@@ -91,7 +91,7 @@ app.post('/api/orders/sync', async (req, res) => {
         [
           order.id,
           order.userId,
-          JSON.stringify(order.items), // ✅ Stringify JSONB
+          order.items, // ✅ Direct JSON object (PostgreSQL handles it)
           order.total,
           order.tax,
           order.grandTotal,
