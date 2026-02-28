@@ -76,6 +76,11 @@ app.post('/api/orders/sync', async (req, res) => {
     const { orders } = req.body;
 
     for (const order of orders) {
+      // Ensure items is properly serialized
+      const itemsJson = typeof order.items === 'string' 
+        ? order.items 
+        : JSON.stringify(order.items);
+      
       await pool.query(
         `INSERT INTO orders 
         (id, userId, items, total, tax, grandTotal, createdAt, paymentMethod, syncedAt, cloudId)
@@ -91,7 +96,7 @@ app.post('/api/orders/sync', async (req, res) => {
         [
           order.id,
           order.userId,
-          order.items, // ✅ Direct JSON object (PostgreSQL handles it)
+          itemsJson, // ✅ Safe JSON string
           order.total,
           order.tax,
           order.grandTotal,
