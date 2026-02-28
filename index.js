@@ -91,7 +91,7 @@ app.post('/api/orders/sync', async (req, res) => {
         [
           order.id,
           order.userId,
-          order.items, // ✅ JSONB direct
+          JSON.stringify(order.items), // ✅ Stringify JSONB
           order.total,
           order.tax,
           order.grandTotal,
