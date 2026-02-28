@@ -128,9 +128,22 @@ app.get('/api/orders', async (req, res) => {
       'SELECT * FROM orders ORDER BY createdAt DESC'
     );
 
+    const orders = result.rows.map(row => ({
+      id: row.id,
+      userId: row.userid,
+      items: typeof row.items === 'string' ? JSON.parse(row.items) : row.items,
+      total: parseFloat(row.total),
+      tax: parseFloat(row.tax),
+      grandTotal: parseFloat(row.grandtotal),
+      createdAt: row.createdat,
+      paymentMethod: row.paymentmethod,
+      syncedAt: row.syncedat,
+      cloudId: row.cloudid
+    }));
+
     res.json({
       success: true,
-      orders: result.rows
+      orders: orders
     });
 
   } catch (error) {
