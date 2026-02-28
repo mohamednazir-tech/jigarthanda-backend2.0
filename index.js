@@ -95,7 +95,7 @@ app.post('/api/orders/sync', async (req, res) => {
           order.total,
           order.tax,
           order.grandTotal,
-          order.createdAt,
+          new Date(order.createdAt), // ✅ Convert ISO string to Date
           order.paymentMethod,
           new Date(),
           `cloud_${order.id}`
@@ -107,7 +107,12 @@ app.post('/api/orders/sync', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Sync error:', error);
-    res.status(500).json({ success: false });
+    console.error('❌ Error details:', {
+      message: error.message,
+      stack: error.stack,
+      order: orders[0] // Log first order for debugging
+    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
