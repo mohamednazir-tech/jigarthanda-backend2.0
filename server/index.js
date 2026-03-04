@@ -152,7 +152,7 @@ app.post('/api/orders/sync', async (req, res) => {
   }
 });
 
-// Create Order with Push Notification
+// Create Order with Push Notification - v2.0
 app.post('/api/orders', async (req, res) => {
   try {
     const { userId, items, total, tax, grandTotal, paymentMethod } = req.body;
