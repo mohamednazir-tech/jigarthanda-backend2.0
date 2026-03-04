@@ -180,7 +180,8 @@ app.post('/api/orders', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO orders (id, userId, items, total, tax, grandTotal, paymentMethod) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [orderId, userId, JSON.stringify(items), total, tax || 0, grandTotal, paymentMethod]
     );
     
     console.log('=== DATABASE RESULT ===');
