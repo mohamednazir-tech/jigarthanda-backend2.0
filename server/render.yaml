@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: jigarthanda-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+        value: "postgresql://postgres:n_.Ty@6EJ_+4w77@db.zijjnutlwktrrvxhkwxu.supabase.co:5432/postgres"
