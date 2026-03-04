@@ -152,7 +152,7 @@ app.post('/api/orders/sync', async (req, res) => {
   }
 });
 
-// Create Order with Push Notification - v2.2 (POST route fix - $(date))
+// Create Order with Push Notification - v2.3 (Fixed query params - 2026-03-04-19:40)
 app.post('/api/orders', async (req, res) => {
   try {
     console.log('=== ORDER REQUEST RECEIVED ===');
