@@ -3,6 +3,16 @@ const cors = require('cors');
 const { Pool } = require('pg');
 require('dotenv').config();
 
+// Optional cron import for production reliability
+let cron;
+try {
+  cron = require('node-cron');
+  console.log('✅ node-cron loaded - production scheduler available');
+} catch (error) {
+  console.log('⚠️ node-cron not available - using fallback scheduler');
+  cron = null;
+}
+
 // 🚀 DEPLOYMENT VERSION STAMP - Instant verification trick
 const DEPLOY_VERSION = "v2.3-POST-FIX-2026-03-04-19:50";
 console.log("🚀 Starting server with version:", DEPLOY_VERSION);
@@ -202,6 +212,8 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid user ID' });
     }
 
+    const orderId = `ORD${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+    
     // Get user name for createdByName field
     let createdByName = 'Unknown';
     if (userId === 'usr_admin_001') {
@@ -210,56 +222,63 @@ app.post('/api/orders', async (req, res) => {
       createdByName = 'Nazir';
     }
 
-    const orderId = `ORD${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
+    console.log('=== DATABASE TRANSACTION START ===');
     
-    // Get sequential order number from sequence
-    const orderNumberResult = await pool.query('SELECT nextval(\'order_number_seq\') as orderNumber');
-    const orderNumber = orderNumberResult.rows[0].orderNumber;
+    // Use transaction to prevent race condition between sequence and insert
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Get sequential order number within transaction
+      const orderNumberResult = await client.query('SELECT nextval(\'order_number_seq\') as orderNumber');
+      const orderNumber = orderNumberResult.rows[0].orderNumber;
+      
+      // Insert order with the obtained sequence number
+      const query = `
+        INSERT INTO orders (id, orderNumber, userId, createdByName, items, total, tax, grandTotal, paymentMethod, status) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
+      `;
+      
+      console.log('Query:', query);
+      console.log('Values:', [orderId, orderNumber, userId, createdByName, JSON.stringify(items), total, tax || 0, grandTotal, paymentMethod, 'pending']);
 
-    console.log('=== DATABASE QUERY START ===');
-    const query = `
-      INSERT INTO orders (id, orderNumber, userId, createdByName, items, total, tax, grandTotal, paymentMethod, status) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *
-    `;
-    
-    console.log('Query:', query);
-    console.log('Values:', [orderId, orderNumber, userId, createdByName, JSON.stringify(items), total, tax || 0, grandTotal, paymentMethod, 'pending']);
+      const result = await client.query(
+        query,
+        [orderId, orderNumber, userId, createdByName, JSON.stringify(items), total, tax || 0, grandTotal, paymentMethod, 'pending']
+      );
+      
+      await client.query('COMMIT');
+      
+      const order = {
+        ...result.rows[0],
+        items: typeof result.rows[0].items === "string" ? JSON.parse(result.rows[0].items) : result.rows[0].items,
+      };
 
-    const result = await pool.query(
-      query,
-      [orderId, orderNumber, userId, createdByName, JSON.stringify(items), total, tax || 0, grandTotal, paymentMethod, 'pending']
-    );
-    
-    console.log('=== DATABASE RESULT ===');
-    console.log('Result:', result);
-    console.log('Rows:', result.rows);
+      console.log('=== ORDER CREATED SUCCESSFULLY ===');
+      console.log('Order created:', order);
+      console.log('Created by user ID:', userId);
+      console.log('User role from cache:', userRole);
 
-    const order = {
-      ...result.rows[0],
-      items:
-        typeof result.rows[0].items === "string"
-          ? JSON.parse(result.rows[0].items)
-          : result.rows[0].items
-    };
+      // Send push notification to Nazir if staff user created order
+      if (userRole === 'staff') {
+        console.log('🔔 Staff user created order - sending notification to Nazir');
+        await sendPushNotificationToNazir(order);
+      } else {
+        console.log('👤 Admin user created order - no notification needed');
+      }
 
-    console.log('=== ORDER CREATED ===');
-    console.log('Order:', order);
-    console.log('Created by user ID:', userId);
-    console.log('User role from cache:', userRole);
+      // Send confirmation to user
+      await sendPushNotificationToUser(order, userId);
 
-    // Send push notification to Nazir if staff created order
-    if (userRole === 'staff') { // Any staff user creates order
-      console.log('🔔 Staff user created order - sending notification to Nazir');
-      await sendPushNotificationToNazir(order);
-    } else {
-      console.log('ℹ️ Non-staff user created order - no notification to Nazir');
+      res.json({ success: true, message: 'Order created', order });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Transaction rolled back:', error);
+      throw error;
+    } finally {
+      client.release();
     }
-    
-    // Send push notification to the user who created the order
-    await sendPushNotificationToUser(order, userId);
-
-    console.log('Order created:', orderId);
-    res.status(200).json({ success: true, message: 'Order created', order });
   } catch (error) {
     console.error('=== ORDER CREATION ERROR ===');
     console.error('Error details:', error);
@@ -462,25 +481,36 @@ async function sendDailySummaryToNazir() {
   }
 }
 
-// Schedule daily summary at 11:59 PM
-function scheduleDailySummary() {
+// Fallback scheduler for when node-cron is not available
+function scheduleDailySummaryFallback() {
   const now = new Date();
-  const today = new Date();
-  today.setHours(23, 59, 0, 0); // 11:59 PM today
+  const nextRun = new Date();
+  nextRun.setHours(0, 1, 0, 0); // 12:01 AM
 
-  if (today < now) {
-    today.setDate(today.getDate() + 1); // If 11:59 PM has passed, schedule for tomorrow
+  if (nextRun <= now) {
+    nextRun.setDate(nextRun.getDate() + 1);
   }
-  
-  const msUntilToday = today - now;
-  
-  console.log(`📅 Daily summary scheduled for: ${today.toISOString()}`);
-  
+
+  const delay = nextRun - now;
+  console.log(`📅 Fallback daily summary scheduled for: ${nextRun.toISOString()}`);
+  console.log(`⏰ Runs in ${(delay / 60000).toFixed(1)} minutes`);
+
   setTimeout(() => {
     sendDailySummaryToNazir();
-    // Schedule for next day
-    scheduleDailySummary();
-  }, msUntilToday);
+    scheduleDailySummaryFallback(); // schedule next run
+  }, delay);
+}
+
+// Schedule daily summary using cron (production-grade)
+if (cron) {
+  cron.schedule('1 0 * * *', async () => {
+    console.log('📅 Running daily summary via cron (12:01 AM)');
+    await sendDailySummaryToNazir();
+  });
+} else {
+  console.log('⚠️ Using fallback scheduler - install node-cron for production reliability');
+  // Fallback to old method if cron not available
+  scheduleDailySummaryFallback();
 }
 
 // Delete orders older than 3 days (pure SQL for accuracy)
@@ -943,19 +973,18 @@ const startServer = async () => {
       console.log(`🌐 Network: http://10.171.132.69:${PORT}`);
     });
 
-    // Schedule daily summary at 11:59 PM
-    scheduleDailySummary();
-    
-    // Schedule daily cleanup at 12:00 AM
+    // Schedule daily cleanup at 12:00 AM (keep old scheduler for cleanup)
     scheduleOrderCleanup();
     
-    // Run cleanup immediately on server start (professional behavior)
+    // Run immediate cleanup on server start (professional behavior)
     console.log('🧹 Running immediate cleanup on server start...');
     await cleanupOrders();
     
     // Schedule automatic cleanup every 24 hours
     setInterval(cleanupOrders, 24 * 60 * 60 * 1000); // Run once per day
     console.log("⏰ Automatic cleanup scheduled every 24 hours");
+
+    console.log("🕐 Daily summary scheduled via cron (12:01 AM daily)");
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
