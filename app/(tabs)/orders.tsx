@@ -88,37 +88,33 @@ const PaymentIcon = Ionicons;
 export default function OrdersScreen() {
   const { user } = useAuth();
   const { orders, todayOrders, todayTotal, clearAllOrders } = useOrders();
+  const [isLive, setIsLive] = useState(true); // Live indicator
   
-  // Show all orders for nazir, hide orders for admin
-  const displayOrders = user?.role === 'staff' ? todayOrders : [];
-  
-  if (user?.role === 'admin') {
+  // Hide orders from admin user (staff role) - only show to Nazir (admin role)
+  if (user?.role === 'staff') {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.accessDeniedContainer}>
-          <Ionicons name="receipt" size={48} color={Colors.border} />
-          <Text style={styles.accessDeniedTitle}>Orders Hidden</Text>
-          <Text style={styles.accessDeniedMessage}>
-            Order history is not available for admin users
+        <View style={styles.accessDenied}>
+          <Ionicons name="lock-closed" size={64} color={Colors.border} />
+          <Text style={styles.accessDeniedTitle}>Access Restricted</Text>
+          <Text style={styles.accessDeniedText}>
+            Only Nazir can view orders
           </Text>
         </View>
       </SafeAreaView>
     );
   }
   
-  if (user?.role === 'staff' && displayOrders.length === 0) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.emptyState}>
-          <Ionicons name="receipt" size={64} color={Colors.border} />
-          <Text style={styles.emptyTitle}>No Orders Yet</Text>
-          <Text style={styles.emptyText}>
-            Orders will appear here once billing starts
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // Show all orders for Nazir (admin role)
+  const displayOrders = orders;
+  
+  console.log('=== ORDERS SCREEN DEBUG ===');
+  console.log('User role:', user?.role);
+  console.log('User ID:', user?.id);
+  console.log('Total orders loaded:', orders.length);
+  console.log('Display orders:', displayOrders.length);
+  console.log('Orders:', displayOrders);
+  console.log('============================');
 
   const formatDate = (date: Date) => {
     return new Date(date).toLocaleDateString('en-IN', {
@@ -140,7 +136,15 @@ export default function OrdersScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Orders</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Orders</Text>
+            {isLive && (
+              <View style={styles.liveIndicator}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>LIVE</Text>
+              </View>
+            )}
+          </View>
           {user && (
             <View style={styles.userBadge}>
               <Ionicons name="person" size={12} color={Colors.cream} />
@@ -216,6 +220,32 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700' as const,
     color: Colors.white,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.white,
+  },
+  liveText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.white,
+    letterSpacing: 0.5,
   },
   userBadge: {
     flexDirection: 'row',
@@ -560,22 +590,24 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: Colors.gold,
   },
-  accessDeniedContainer: {
+  accessDenied: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: 32,
   },
   accessDeniedTitle: {
     fontSize: 20,
     fontWeight: '700' as const,
     color: Colors.text,
-    marginTop: 20,
-    marginBottom: 8,
+    marginTop: 16,
+    textAlign: 'center',
   },
-  accessDeniedMessage: {
+  accessDeniedText: {
     fontSize: 14,
     color: Colors.textMuted,
+    marginTop: 8,
     textAlign: 'center',
+    lineHeight: 20,
   },
 });

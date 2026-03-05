@@ -22,6 +22,7 @@ export interface Order {
   grandTotal: number;
   createdAt: Date;
   paymentMethod: 'cash' | 'upi';
+  status: 'pending' | 'preparing' | 'ready' | 'completed';
 }
 
 export interface ShopSettings {

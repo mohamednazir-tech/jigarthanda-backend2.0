@@ -1,8 +1,8 @@
 // API Configuration for Multi-Device Support
 export const API_CONFIG = {
-  // Development (localhost for web, IP for mobile)
+  // Development (use production backend)
   development: {
-    baseURL: 'https://jigarthanda-api.onrender.com/api',  // Use production backend
+    baseURL: 'https://jigarthanda-api.onrender.com/api',
     timeout: 10000,
   },
   

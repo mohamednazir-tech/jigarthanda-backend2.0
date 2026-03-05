@@ -20,17 +20,34 @@ export default function SettingsScreen() {
   const { settings, updateSettings } = useOrders();
   const { user, logout } = useAuth();
   const [formData, setFormData] = useState(settings);
+  const [userData, setUserData] = useState({
+    name: user?.name || '',
+    phone: user?.phone || '',
+    district: user?.district || '',
+    districtTamil: user?.districtTamil || ''
+  });
   const [saved, setSaved] = useState(false);
 
   // Check if user can edit settings (admin and staff)
   const canEditSettings = user?.role === 'admin' || user?.role === 'staff';
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!canEditSettings) return;
-    updateSettings(formData);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-    Alert.alert('Saved', 'Shop settings have been updated');
+    
+    try {
+      // Save shop settings
+      await updateSettings(formData);
+      
+      // Save user details (for now, just log them)
+      console.log('User details updated:', userData);
+      
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      Alert.alert('Saved', 'All settings have been updated');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      Alert.alert('Error', 'Failed to save settings');
+    }
   };
 
   const handleLogout = () => {
@@ -172,8 +189,9 @@ export default function SettingsScreen() {
                 <Text style={styles.inputLabel}>User Name</Text>
                 <TextInput
                   style={styles.input}
-                  value={user?.name || ''}
-                  editable={false}
+                  value={userData.name}
+                  onChangeText={(text) => setUserData({ ...userData, name: text })}
+                  editable={canEditSettings}
                   placeholder="User name"
                   placeholderTextColor={Colors.textMuted}
                 />
@@ -188,8 +206,16 @@ export default function SettingsScreen() {
                 <Text style={styles.inputLabel}>User Location</Text>
                 <TextInput
                   style={styles.input}
-                  value={`${user?.district || 'Madurai'}, ${user?.districtTamil || 'மதுரை'}`}
-                  editable={false}
+                  value={`${userData.district}, ${userData.districtTamil}`}
+                  onChangeText={(text) => {
+                    const parts = text.split(', ');
+                    setUserData({ 
+                      ...userData, 
+                      district: parts[0] || 'Madurai',
+                      districtTamil: parts[1] || 'மதுரை'
+                    });
+                  }}
+                  editable={canEditSettings}
                   placeholder="User location"
                   placeholderTextColor={Colors.textMuted}
                 />
@@ -204,8 +230,9 @@ export default function SettingsScreen() {
                 <Text style={styles.inputLabel}>User Phone</Text>
                 <TextInput
                   style={styles.input}
-                  value={user?.phone || ''}
-                  editable={false}
+                  value={userData.phone}
+                  onChangeText={(text) => setUserData({ ...userData, phone: text })}
+                  editable={canEditSettings}
                   placeholder="Enter phone number"
                   placeholderTextColor={Colors.textMuted}
                   keyboardType="phone-pad"

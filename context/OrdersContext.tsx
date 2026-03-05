@@ -29,30 +29,52 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
     loadData();
   }, []);
 
-  // Clean up orders older than 3 days
+  // Live orders polling - refresh every 5 seconds ONLY for Nazir
   useEffect(() => {
-    const cleanupOldOrders = () => {
-      const threeDaysAgo = new Date();
-      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-      threeDaysAgo.setHours(0, 0, 0, 0);
-
-      const filteredOrders = allOrders.filter(order => 
-        new Date(order.createdAt) >= threeDaysAgo
-      );
-
-      if (filteredOrders.length !== allOrders.length) {
-        setAllOrders(filteredOrders);
-        saveOrders(filteredOrders);
-        console.log('Cleaned up orders older than 3 days. Removed:', allOrders.length - filteredOrders.length, 'orders');
+    if (user?.id !== 'usr_nazir_001') return; // Only Nazir needs live updates
+    
+    console.log('🔄 Starting live orders polling for Nazir...');
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        console.log('🔄 Polling for new orders...');
+        const apiOrders = await ApiService.getOrders();
+        
+        if (apiOrders.length > allOrders.length) {
+          console.log(`🆕 ${apiOrders.length - allOrders.length} new orders found!`);
+          
+          // Play sound alert for Nazir
+          if (user?.id === 'usr_nazir_001') {
+            try {
+              // Use Expo Audio for sound alert
+              const { Sound } = await require('expo-av');
+              const { sound } = await Sound.createAsync(
+                require('@/assets/sounds/order-alert.mp3')
+              );
+              await sound.playAsync();
+              console.log('🔔 Order alert sound played');
+            } catch (error) {
+              console.log('🔔 Could not play sound (file may not exist):', error);
+              // Fallback: Use system sound
+              console.log('🔔 New order received!');
+            }
+          }
+          
+          setAllOrders(apiOrders.map(order => ({
+            ...order,
+            createdAt: new Date(order.createdAt)
+          })));
+        }
+      } catch (error) {
+        console.error('❌ Polling error:', error);
       }
+    }, 5000); // Every 5 seconds
+
+    return () => {
+      console.log('🛑 Stopping live orders polling');
+      clearInterval(pollInterval);
     };
-
-    // Run cleanup on load and then every hour
-    cleanupOldOrders();
-    const cleanupInterval = setInterval(cleanupOldOrders, 60 * 60 * 1000); // Every hour
-
-    return () => clearInterval(cleanupInterval);
-  }, [allOrders]);
+  }, [user?.id]);
 
   // Daily summary notification for Nazir
   useEffect(() => {
@@ -103,6 +125,10 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
 
       if (apiOrders.length > 0) {
         // Use API orders if available
+        console.log('=== LOADING ORDERS FROM API ===');
+        console.log('API Orders count:', apiOrders.length);
+        console.log('API Orders:', apiOrders);
+        
         setAllOrders(apiOrders.map(order => ({
           ...order,
           createdAt: new Date(order.createdAt)
@@ -165,8 +191,38 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
   };
 
   const orders = useMemo(() => {
-    if (!user) return [];
-    return allOrders.filter(order => order.userId === user.id);
+    console.log('=== ORDERS CONTEXT DEBUG ===');
+    console.log('User object:', user);
+    console.log('User ID:', user?.id);
+    console.log('User role:', user?.role);
+    console.log('User username:', user?.username);
+    
+    if (!user) {
+      console.log('No user logged in - returning empty orders');
+      return [];
+    }
+    
+    // Nazir sees all orders, others see only their own
+    if (user?.role === 'admin' || user?.id === 'usr_nazir_001') {
+      console.log('=== NAZIR (ADMIN) DETECTED ===');
+      console.log('All orders count:', allOrders.length);
+      console.log('Nazir (admin) sees ALL orders');
+      console.log('Orders by user:', allOrders.reduce((acc: Record<string, number>, order) => {
+        acc[order.userId] = (acc[order.userId] || 0) + 1;
+        return acc;
+      }, {}));
+      console.log('===========================');
+      return allOrders;
+    }
+    
+    console.log('=== NON-ADMIN USER DETECTED ===');
+    console.log('User role:', user?.role, '- filtering by user ID');
+    const filtered = allOrders.filter(order => order.userId === user.id);
+    console.log('All orders count:', allOrders.length);
+    console.log('Filtered orders count:', filtered.length);
+    console.log('User sees only their own orders');
+    console.log('===============================');
+    return filtered;
   }, [allOrders, user]);
 
   const createOrder = useCallback(async (items: CartItem[], paymentMethod: 'cash' | 'upi') => {
@@ -176,6 +232,12 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
     }
 
     try {
+      console.log('=== ORDERS CONTEXT - CREATE ORDER START ===');
+      console.log('User:', user?.id, user?.name, user?.role);
+      console.log('Items:', items);
+      console.log('Payment method:', paymentMethod);
+      console.log('Total:', items.reduce((sum, item) => sum + item.item.price * item.quantity, 0));
+      
       // Create order via API (with push notification)
       const order = await ApiService.createOrder({
         userId: user.id,
@@ -185,7 +247,11 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
         grandTotal: items.reduce((sum, item) => sum + item.item.price * item.quantity, 0),
         paymentMethod,
         createdAt: new Date(),
+        status: 'pending',
       });
+
+      console.log('=== ORDERS CONTEXT - API RESPONSE ===');
+      console.log('Order created:', order);
 
       if (order) {
         // Update local state
@@ -206,7 +272,9 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
 
       return null;
     } catch (error) {
-      console.error('Create order error:', error);
+      console.error('=== ORDERS CONTEXT - CREATE ORDER ERROR ===');
+      console.error('Error details:', error);
+      console.error('Error message:', (error as Error).message);
       return null;
     }
   }, [user, allOrders]);
@@ -260,13 +328,31 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
   }, [settings]);
 
   const todayOrders = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return allOrders.filter(o => new Date(o.createdAt) >= today);
-  }, [allOrders]);
+    const todayString = new Date().toDateString();
+    
+    // Calculate today's orders from the already role-filtered orders list
+    const filtered = orders.filter(order => {
+      const orderDateString = new Date(order.createdAt).toDateString();
+      return orderDateString === todayString;
+    });
+    
+    console.log('=== TODAY ORDERS DEBUG ===');
+    console.log('Today string:', todayString);
+    console.log('Orders list length:', orders.length);
+    console.log('Filtered orders:', filtered.length);
+    console.log('Order dates:', orders.map(o => ({
+      id: o.id,
+      date: new Date(o.createdAt).toISOString(),
+      dateOnly: new Date(o.createdAt).toDateString(),
+      isToday: new Date(o.createdAt).toDateString() === todayString
+    })));
+    console.log('========================');
+    
+    return filtered;
+  }, [orders]);
 
   const todayTotal = useMemo(() => {
-    return todayOrders.reduce((sum, o) => sum + o.grandTotal, 0);
+    return todayOrders.reduce((sum, o) => sum + Number(o.grandTotal || 0), 0);
   }, [todayOrders]);
 
 
@@ -279,6 +365,35 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
     console.log('Cleared orders for user:', user.username);
   }, [allOrders, user]);
 
+  const updateOrderStatus = useCallback(async (id: string, status: 'pending' | 'preparing' | 'ready' | 'completed') => {
+    try {
+      const updatedOrder = await ApiService.updateOrderStatus(id, status);
+      if (updatedOrder) {
+        setAllOrders(prevOrders => 
+          prevOrders.map(order => 
+            order.id === id ? { ...order, status } : order
+          )
+        );
+        console.log(`✅ Order ${id} status updated to: ${status}`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to update order status:', error);
+    }
+  }, []);
+
+  const deleteAllOrders = useCallback(async () => {
+    try {
+      const result = await ApiService.deleteAllOrders();
+      if (result.success) {
+        setAllOrders([]);
+        await AsyncStorage.removeItem(ORDERS_KEY);
+        console.log(`🗑️ Deleted all orders: ${result.deletedCount} records removed`);
+      }
+    } catch (error) {
+      console.error('❌ Failed to delete all orders:', error);
+    }
+  }, []);
+
   return {
     orders,
     allOrders,
@@ -289,5 +404,7 @@ export const [OrdersProvider, useOrders] = createContextHook(() => {
     todayOrders,
     todayTotal,
     clearAllOrders: clearUserOrders,
+    updateOrderStatus,
+    deleteAllOrders,
   };
 });

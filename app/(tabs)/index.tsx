@@ -98,6 +98,9 @@ export default function MenuScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Hanifa Jigarthanda</Text>
+      </View>
       {showStatsBar && (
         <View style={styles.statsBar}>
           <View style={styles.statItem}>
@@ -176,6 +179,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.cream,
+  },
+  header: {
+    backgroundColor: Colors.primary,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: Colors.white,
   },
   statsBar: {
     flexDirection: 'row',

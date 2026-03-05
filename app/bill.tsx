@@ -13,6 +13,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { useOrders } from '@/context/OrdersContext';
+import { useCart } from '@/context/CartContext';
 import { useRouter } from "expo-router";
 
 
@@ -21,6 +22,7 @@ export default function BillScreen() {
   const router = useRouter();
   const { orderId } = useLocalSearchParams<{ orderId: string }>();
   const { orders, allOrders, settings } = useOrders();
+  const { clearCart } = useCart();
 
   const order = allOrders.find(o => o.id === orderId);
 
@@ -29,7 +31,7 @@ export default function BillScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.errorState}>
           <Text style={styles.errorText}>Order not found</Text>
-          <TouchableOpacity style={styles.homeBtn} onPress={() => router.replace('/(tabs)/menu')}>
+          <TouchableOpacity style={styles.homeBtn} onPress={() => router.replace('/')}>
             <Ionicons name="home" size={20} color={Colors.white} />
             <Text style={styles.homeBtnText}>Go Home</Text>
           </TouchableOpacity>
@@ -224,7 +226,10 @@ Payment: ${order.paymentMethod.toUpperCase()}
 
         <TouchableOpacity
   style={styles.doneBtn}
-  onPress={() => router.replace('/(tabs)/menu')}
+  onPress={() => {
+    clearCart();
+    router.replace('/');
+  }}
   activeOpacity={0.8}
 >
   <Ionicons name="home" size={20} color={Colors.white} />
