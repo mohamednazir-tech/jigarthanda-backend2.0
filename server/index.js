@@ -282,11 +282,14 @@ app.post('/api/orders', async (req, res) => {
       console.log('User role from cache:', userRole);
 
       // Send push notification to Baseel for ALL new orders (both admin and staff)
-      console.log('🔔 New order created - sending notification to Baseel');
-      await sendPushNotificationToBaseel(order);
+    console.log('🔔 New order created - sending notification to Baseel');
+    console.log('📱 Order created by:', userId, '(', userRole, ')');
+    console.log('🎯 Sending NEW ORDER notification to Baseel (usr_nazir_001)');
+    await sendPushNotificationToBaseel(order);
 
-      // Send confirmation to user
-      await sendPushNotificationToUser(order, userId);
+    // Send confirmation to user who created order
+    console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
+    await sendPushNotificationToUser(order, userId);
 
       res.json({ success: true, message: 'Order created', order });
 
@@ -307,16 +310,20 @@ app.post('/api/orders', async (req, res) => {
 // Send push notification to Baseel
 async function sendPushNotificationToBaseel(order) {
   try {
+    console.log('🎯 sendPushNotificationToBaseel called for order:', order.id);
+    
     // Get Baseel's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token, platform, isActive FROM user_devices WHERE userId = $1 AND isActive = true',
       ['usr_nazir_001'] // Baseel user ID
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
+    console.log('📱 Baseel active devices found:', tokens.length);
+    console.log('📱 Baseel device tokens:', tokens.map(t => t.slice(-10)));
 
     if (tokens.length === 0) {
-      console.log('No active device found for Baseel');
+      console.log('❌ No active device found for Baseel (usr_nazir_001)');
       return;
     }
 
@@ -384,16 +391,20 @@ async function sendPushNotificationToBaseel(order) {
 // Send push notification to the user who created the order
 async function sendPushNotificationToUser(order, userId) {
   try {
+    console.log('🎯 sendPushNotificationToUser called for order:', order.id, 'to user:', userId);
+    
     // Get user's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token, platform, isActive FROM user_devices WHERE userId = $1 AND isActive = true',
       [userId]
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
+    console.log('📱 User', userId, 'active devices found:', tokens.length);
+    console.log('📱 User', userId, 'device tokens:', tokens.map(t => t.slice(-10)));
 
     if (tokens.length === 0) {
-      console.log(`No devices found for user: ${userId}`);
+      console.log(`❌ No active devices found for user: ${userId}`);
       return;
     }
 
