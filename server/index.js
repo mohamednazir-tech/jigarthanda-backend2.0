@@ -1094,6 +1094,59 @@ app.get('/api/active-device/:userId', async (req, res) => {
   }
 });
 
+// Check all device tokens - debug for token duplication
+app.get('/api/all-device-tokens', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT userId, token, platform, isActive, createdAt FROM user_devices ORDER BY userId, createdAt DESC'
+    );
+    
+    const deviceTokens = result.rows.map(row => ({
+      userId: row.userid,
+      token: row.token ? row.token.slice(-15) + '...' : 'NULL',
+      platform: row.platform,
+      isActive: row.isactive,
+      registeredAt: row.createdat
+    }));
+    
+    // Check for duplicate tokens
+    const tokenMap = {};
+    const duplicates = [];
+    
+    result.rows.forEach(row => {
+      const token = row.token;
+      if (token && tokenMap[token]) {
+        duplicates.push({
+          token: token.slice(-15) + '...',
+          users: [tokenMap[token], row.userid]
+        });
+      } else if (token) {
+        tokenMap[token] = row.userid;
+      }
+    });
+    
+    console.log('🔍 DEVICE TOKEN ANALYSIS:');
+    console.log('📱 All devices:', deviceTokens);
+    console.log('🚨 Duplicate tokens found:', duplicates.length);
+    
+    res.json({
+      success: true,
+      devices: deviceTokens,
+      duplicates: duplicates,
+      analysis: {
+        totalDevices: deviceTokens.length,
+        activeDevices: deviceTokens.filter(d => d.isActive).length,
+        duplicateTokens: duplicates.length,
+        hasTokenDuplication: duplicates.length > 0
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Device token analysis error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Debug Baseel notifications - comprehensive check
 app.get('/api/debug-baseel-notifications', async (req, res) => {
   try {
@@ -1292,6 +1345,7 @@ app.get('/', (req, res) => {
       activeDevice: '/api/active-device/:userId',
       debugBaseel: '/api/debug-baseel-notifications',
       testBaseelNotification: '/api/test-baseel-notification',
+      allDeviceTokens: '/api/all-device-tokens',
       testDailySummary: '/api/test-daily-summary'
     },
     status: 'production-ready',
