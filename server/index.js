@@ -1,7 +1,14 @@
 const express = require('express');
 const cors = require('cors');
+const axios = require('axios');
 const { Pool } = require('pg');
 require('dotenv').config();
+
+// Environment safety check
+if (!process.env.DATABASE_URL) {
+  console.error("❌ DATABASE_URL missing - server cannot start");
+  process.exit(1);
+}
 
 // Optional cron import for production reliability
 let cron;
@@ -26,6 +33,9 @@ const PORT = process.env.PORT || 3000;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL, // ✅ Supabase connection
+  max: 20, // Maximum number of connections
+  idleTimeoutMillis: 30000, // Close idle connections after 30s
+  connectionTimeoutMillis: 2000, // Return error after 2s if can't connect
 });
 
 // Test DB connection
@@ -106,7 +116,12 @@ const createTables = async () => {
     );
 
     await pool.query(
-      'CREATE TABLE IF NOT EXISTS user_devices (id SERIAL PRIMARY KEY, userId VARCHAR(50) NOT NULL, token TEXT NOT NULL, platform VARCHAR(20) NOT NULL, createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(userId, token))'
+      'CREATE TABLE IF NOT EXISTS user_devices (id SERIAL PRIMARY KEY, userId VARCHAR(50) NOT NULL, token TEXT NOT NULL, platform VARCHAR(20) NOT NULL, isActive BOOLEAN DEFAULT false, createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(userId, token))'
+    );
+
+    // Add isActive column to existing tables (migration)
+    await pool.query(
+      'ALTER TABLE user_devices ADD COLUMN IF NOT EXISTS isActive BOOLEAN DEFAULT false'
     );
 
     // Enable RLS on user_devices table
@@ -121,7 +136,14 @@ const createTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_orders_createdat 
       ON orders (createdAt DESC)
     `);
-    console.log('✅ Performance index created for orders.createdAt');
+    
+    // Create compound index for optimized orders query
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_orders_createdat_status 
+      ON orders (createdAt DESC, status)
+    `);
+    
+    console.log('✅ Performance indexes created for orders');
 
     console.log('✅ Tables ready');
   } catch (error) {
@@ -185,8 +207,8 @@ app.post('/api/orders/sync', async (req, res) => {
 
 // Cached user roles for performance and security
 const userRoles = {
-  "usr_admin_001": "staff",
-  "usr_nazir_001": "admin"
+  "usr_admin_001": "admin",
+  "usr_nazir_001": "staff"
 };
 
 // Create Order with Push Notification - v2.3 (Fixed query params - 2026-03-04-19:40)
@@ -219,7 +241,7 @@ app.post('/api/orders', async (req, res) => {
     if (userId === 'usr_admin_001') {
       createdByName = 'Admin';
     } else if (userId === 'usr_nazir_001') {
-      createdByName = 'Nazir';
+      createdByName = 'Baseel';
     }
 
     console.log('=== DATABASE TRANSACTION START ===');
@@ -231,7 +253,7 @@ app.post('/api/orders', async (req, res) => {
       
       // Get sequential order number within transaction
       const orderNumberResult = await client.query('SELECT nextval(\'order_number_seq\') as orderNumber');
-      const orderNumber = orderNumberResult.rows[0].orderNumber;
+      const orderNumber = orderNumberResult.rows[0].ordernumber; // PostgreSQL returns lowercase
       
       // Insert order with the obtained sequence number
       const query = `
@@ -259,12 +281,12 @@ app.post('/api/orders', async (req, res) => {
       console.log('Created by user ID:', userId);
       console.log('User role from cache:', userRole);
 
-      // Send push notification to Nazir if staff user created order
+      // Send push notification to Baseel if staff user created order
       if (userRole === 'staff') {
-        console.log('🔔 Staff user created order - sending notification to Nazir');
-        await sendPushNotificationToNazir(order);
+        console.log('🔔 Staff user created order - sending notification to Baseel');
+        await sendPushNotificationToBaseel(order);
       } else {
-        console.log('👤 Admin user created order - no notification needed');
+        console.log('👤 Admin user created order - no notification to Baseel (admin manages orders directly)');
       }
 
       // Send confirmation to user
@@ -286,28 +308,28 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// Send push notification to Nazir
-async function sendPushNotificationToNazir(order) {
+// Send push notification to Baseel
+async function sendPushNotificationToBaseel(order) {
   try {
-    // Get Nazir's device tokens
+    // Get Baseel's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1',
-      ['usr_nazir_001'] // Nazir user ID
+      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      ['usr_nazir_001'] // Baseel user ID
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
 
     if (tokens.length === 0) {
-      console.log('No devices found for Nazir');
+      console.log('No active device found for Baseel');
       return;
     }
 
-    // Send push notification via Expo
-    const axios = require('axios');
+    // Send push notifications to ALL devices in PARALLEL for better performance
+    // Prepare notification data once
     const items = typeof order.items === "string"
       ? JSON.parse(order.items)
       : order.items;
-    const itemNames = items.map(item => item.name).slice(0, 3);
+    const itemNames = items.map(i => i.item.name).slice(0, 3);
     const itemsText = itemNames.length > 2 
       ? `${itemNames.join(', ')} + ${items.length - 2} more`
       : itemNames.join(', ');
@@ -317,30 +339,46 @@ async function sendPushNotificationToNazir(order) {
       hour: '2-digit', 
       minute: '2-digit' 
     });
-    
-    for (const token of tokens) {
-      await axios.post(
-        'https://exp.host/--/api/v2/push/send',
-        {
-          to: token,
-          sound: 'default',
-          title: '🔔 NEW ORDER RECEIVED',
-          body: `📋 Order #${order.id.slice(-6)}\n🍹 ${itemsText}\n💰 ₹${order.total}\n🕐 ${orderTime}`,
-          data: { 
-            orderId: order.id,
-            type: 'new_order',
-            screen: 'orders',
-            priority: 'urgent'
-          },
-          priority: 'high',
-          badge: 1,
-          channelId: 'orders'
-        },
-        { timeout: 5000 }
-      );
-    }
 
-    console.log('✅ Push notification sent to Nazir devices:', tokens.length);
+    const notificationPromises = tokens.map(async (token) => {
+      try {
+        await axios.post(
+          'https://exp.host/--/api/v2/push/send',
+          {
+            to: token,
+            sound: 'default',
+            title: '🔔 NEW ORDER RECEIVED',
+            body: `📋 Order #${order.id.slice(-6)}\n🍹 ${itemsText}\n💰 ₹${order.total}\n🕐 ${orderTime}`,
+            data: { 
+              orderId: order.id,
+              type: 'new_order',
+              screen: 'orders',
+              priority: 'urgent'
+            },
+            priority: 'high',
+            badge: 1,
+            channelId: 'orders'
+          },
+          { timeout: 5000 }
+        );
+        console.log(`✅ Push notification sent to device: ${token.slice(-10)}`);
+        return { success: true, token: token.slice(-10) };
+      } catch (error) {
+        console.error(`❌ Push failed for device ${token.slice(-10)}:`, error.message);
+        return { success: false, token: token.slice(-10), error: error.message };
+      }
+    });
+
+    // Wait for ALL notifications to complete in parallel
+    const results = await Promise.allSettled(notificationPromises);
+    
+    // Log results summary
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
+    
+    console.log(`📊 Parallel notification results: ${successful} successful, ${failed} failed`);
+
+    console.log('✅ Push notification sent to Baseel devices:', tokens.length);
 
   } catch (error) {
     console.error('❌ Push notification error:', error);
@@ -350,9 +388,9 @@ async function sendPushNotificationToNazir(order) {
 // Send push notification to the user who created the order
 async function sendPushNotificationToUser(order, userId) {
   try {
-    // Get user's device tokens
+    // Get user's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1',
+      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
       [userId]
     );
 
@@ -363,43 +401,59 @@ async function sendPushNotificationToUser(order, userId) {
       return;
     }
 
-    // Send push notification via Expo
-    const axios = require('axios');
-    const items = typeof order.items === "string"
-      ? JSON.parse(order.items)
-      : order.items;
-    const itemNames = items.map(item => item.name).slice(0, 3);
-    const itemsText = itemNames.length > 2 
-      ? `${itemNames.join(', ')} + ${items.length - 2} more`
-      : itemNames.join(', ');
+    // Send push notifications to ALL devices in PARALLEL for better performance
+    const notificationPromises = tokens.map(async (token) => {
+      try {
+        // Prepare notification data once
+        const items = typeof order.items === "string"
+          ? JSON.parse(order.items)
+          : order.items;
+        const itemNames = items.map(i => i.item.name).slice(0, 3);
+        const itemsText = itemNames.length > 2 
+          ? `${itemNames.join(', ')} + ${items.length - 2} more`
+          : itemNames.join(', ');
 
-    // Professional confirmation formatting
-    const orderTime = new Date().toLocaleTimeString('en-IN', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+        // Professional confirmation formatting
+        const orderTime = new Date().toLocaleTimeString('en-IN', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        });
+
+        await axios.post(
+          'https://exp.host/--/api/v2/push/send',
+          {
+            to: token,
+            sound: 'default',
+            title: '✅ ORDER CONFIRMED',
+            body: `🧾 Order #${order.id.slice(-6)}\n🍹 ${itemsText}\n💰 Total: ₹${order.total}\n🕐 ${orderTime}\n\n🎉 Ready for pickup!`,
+            data: { 
+              orderId: order.id,
+              type: 'order_confirmed',
+              screen: 'orders',
+              priority: 'normal'
+            },
+            priority: 'high',
+            badge: 1,
+            channelId: 'confirmations'
+          },
+          { timeout: 5000 }
+        );
+        console.log(`✅ User notification sent to device: ${token.slice(-10)}`);
+        return { success: true, token: token.slice(-10) };
+      } catch (error) {
+        console.error(`❌ User push failed for device ${token.slice(-10)}:`, error.message);
+        return { success: false, token: token.slice(-10), error: error.message };
+      }
     });
 
-    for (const token of tokens) {
-      await axios.post(
-        'https://exp.host/--/api/v2/push/send',
-        {
-          to: token,
-          sound: 'default',
-          title: '✅ ORDER CONFIRMED',
-          body: `🧾 Order #${order.id.slice(-6)}\n🍹 ${itemsText}\n💰 Total: ₹${order.total}\n🕐 ${orderTime}\n\n🎉 Ready for pickup!`,
-          data: { 
-            orderId: order.id,
-            type: 'order_confirmed',
-            screen: 'orders',
-            priority: 'normal'
-          },
-          priority: 'high',
-          badge: 1,
-          channelId: 'confirmations'
-        },
-        { timeout: 5000 }
-      );
-    }
+    // Wait for ALL notifications to complete in parallel
+    const results = await Promise.allSettled(notificationPromises);
+    
+    // Log results summary
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
+    
+    console.log(`📊 User notification parallel results: ${successful} successful, ${failed} failed`);
 
     console.log(`✅ Push notification sent to user ${userId}:`, tokens.length);
 
@@ -408,8 +462,8 @@ async function sendPushNotificationToUser(order, userId) {
   }
 }
 
-// Send daily summary notification to Nazir at 11:59 PM
-async function sendDailySummaryToNazir() {
+// Send daily summary notification to Baseel at 11:59 PM
+async function sendDailySummaryToBaseel() {
   try {
     const currentDate = new Date();
     const startOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
@@ -424,25 +478,24 @@ async function sendDailySummaryToNazir() {
     const todayOrders = ordersResult.rows;
     const totalOrders = todayOrders.length;
     const totalSales = todayOrders.reduce(
-      (sum, order) => sum + Number(order.grandtotal || 0),
+      (sum, order) => sum + Number(order.grandTotal || 0),
       0
     );
 
-    // Get Nazir's device tokens
+    // Get Baseel's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1',
+      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
       ['usr_nazir_001']
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
 
     if (tokens.length === 0) {
-      console.log('No devices found for Nazir daily summary');
+      console.log('No devices found for Baseel daily summary');
       return;
     }
 
     // Send daily summary notification
-    const axios = require('axios');
     const reportDate = currentDate.toLocaleDateString('en-IN', {
       weekday: 'long',
       day: 'numeric',
@@ -451,30 +504,47 @@ async function sendDailySummaryToNazir() {
     
     const summaryMessage = `📊 DAILY SALES REPORT\n📅 ${reportDate}\n\n🛒 Total Orders: ${totalOrders}\n💰 Total Revenue: ₹${totalSales.toLocaleString()}\n📈 Avg per Order: ₹${totalOrders > 0 ? Math.round(totalSales / totalOrders) : 0}\n\n🎯 Great job today!`;
 
-    for (const token of tokens) {
-      await axios.post(
-        'https://exp.host/--/api/v2/push/send',
-        {
-          to: token,
-          sound: 'default',
-          title: '📈 DAILY REPORT READY',
-          body: summaryMessage,
-          data: { 
-            type: 'daily_summary',
-            totalOrders,
-            totalSales,
-            date: currentDate.toISOString().split('T')[0],
-            reportType: 'daily'
+    // Send daily summary notifications to ALL devices in PARALLEL for better performance
+    const notificationPromises = tokens.map(async (token) => {
+      try {
+        await axios.post(
+          'https://exp.host/--/api/v2/push/send',
+          {
+            to: token,
+            sound: 'default',
+            title: '📈 DAILY REPORT READY',
+            body: summaryMessage,
+            data: { 
+              type: 'daily_summary',
+              totalOrders,
+              totalSales,
+              date: currentDate.toISOString().split('T')[0],
+              reportType: 'daily'
+            },
+            priority: 'high',
+            badge: 1,
+            channelId: 'reports'
           },
-          priority: 'high',
-          badge: 1,
-          channelId: 'reports'
-        },
-        { timeout: 5000 }
-      );
-    }
+          { timeout: 5000 }
+        );
+        console.log(`✅ Daily summary sent to device: ${token.slice(-10)}`);
+        return { success: true, token: token.slice(-10) };
+      } catch (error) {
+        console.error(`❌ Daily summary failed for device ${token.slice(-10)}:`, error.message);
+        return { success: false, token: token.slice(-10), error: error.message };
+      }
+    });
 
-    console.log(`✅ Daily summary sent to Nazir: ${totalOrders} orders, ₹${totalSales}`);
+    // Wait for ALL notifications to complete in parallel
+    const results = await Promise.allSettled(notificationPromises);
+    
+    // Log results summary
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
+    
+    console.log(`📊 Daily summary parallel results: ${successful} successful, ${failed} failed`);
+
+    console.log(`✅ Daily summary sent to Baseel: ${totalOrders} orders, ₹${totalSales}`);
 
   } catch (error) {
     console.error('❌ Daily summary notification error:', error);
@@ -496,7 +566,7 @@ function scheduleDailySummaryFallback() {
   console.log(`⏰ Runs in ${(delay / 60000).toFixed(1)} minutes`);
 
   setTimeout(() => {
-    sendDailySummaryToNazir();
+    sendDailySummaryToBaseel();
     scheduleDailySummaryFallback(); // schedule next run
   }, delay);
 }
@@ -505,7 +575,7 @@ function scheduleDailySummaryFallback() {
 if (cron) {
   cron.schedule('1 0 * * *', async () => {
     console.log('📅 Running daily summary via cron (12:01 AM)');
-    await sendDailySummaryToNazir();
+    await sendDailySummaryToBaseel();
   });
 } else {
   console.log('⚠️ Using fallback scheduler - install node-cron for production reliability');
@@ -535,43 +605,11 @@ async function deleteOldOrders() {
   }
 }
 
-// Professional cleanup function for scheduling
-async function cleanupOrders() {
-  try {
-    console.log("🗑️ Running automatic order cleanup...");
-    
-    const result = await pool.query(`
-      DELETE FROM orders
-      WHERE createdAt < NOW() - INTERVAL '3 days'
-    `);
-
-    console.log(`✅ Auto-cleanup deleted ${result.rowCount} old orders`);
-  } catch (err) {
-    console.error("❌ Auto-cleanup error:", err);
-  }
-}
-
-// Schedule daily cleanup of old orders at 12:00 AM
-function scheduleOrderCleanup() {
-  const now = new Date();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(0, 0, 0, 0); // 12:00 AM midnight
-  
-  const msUntilTomorrow = tomorrow - now;
-  
-  console.log(`🗑️ Order cleanup scheduled for: ${tomorrow.toISOString()}`);
-  
-  setTimeout(() => {
-    deleteOldOrders();
-    // Schedule for next day
-    scheduleOrderCleanup();
-  }, msUntilTomorrow);
-}
 
 // Get all orders (database already handles 3-day retention)
 app.get('/api/orders', async (req, res) => {
   try {
+    const startTime = Date.now();
     console.log('=== GET ORDERS REQUEST ===');
     
     // Support pagination for future scalability
@@ -584,7 +622,7 @@ app.get('/api/orders', async (req, res) => {
 
     console.log(`📊 Pagination: limit=${safeLimit}, offset=${safeOffset}`);
     
-    // Use explicit columns for production API (safer than SELECT *)
+    // Optimized query with better indexing
     const result = await pool.query(`
       SELECT 
         id,
@@ -599,17 +637,34 @@ app.get('/api/orders', async (req, res) => {
         status,
         createdAt
       FROM orders 
+      WHERE createdAt >= NOW() - INTERVAL '3 days'
       ORDER BY createdAt DESC 
       LIMIT $1 OFFSET $2
     `, [safeLimit, safeOffset]);
 
-    console.log(`📊 Returning ${result.rows.length} orders (database already limited to 3 days)`);
+    console.log(`📊 Query executed in ${Date.now() - startTime}ms`);
+    console.log(`📊 Returning ${result.rows.length} orders`);
 
-    const orders = result.rows.map(row => ({
-      ...row,
-      items: typeof row.items === "string" ? JSON.parse(row.items) : row.items,
-      status: row.status || 'pending',
-    }));
+    // Optimize JSON parsing - batch processing
+    const orders = result.rows.map(row => {
+      try {
+        return {
+          ...row,
+          items: typeof row.items === "string" ? JSON.parse(row.items) : row.items,
+          status: row.status || 'pending',
+        };
+      } catch (error) {
+        console.error('❌ JSON parse error for order:', row.id);
+        return {
+          ...row,
+          items: [],
+          status: row.status || 'pending',
+        };
+      }
+    });
+
+    const totalTime = Date.now() - startTime;
+    console.log(`📊 Total API time: ${totalTime}ms`);
 
     res.json({ 
       success: true, 
@@ -617,7 +672,8 @@ app.get('/api/orders', async (req, res) => {
       pagination: {
         limit: safeLimit,
         offset: safeOffset,
-        count: result.rows.length
+        count: result.rows.length,
+        responseTime: totalTime
       }
     });
   } catch (error) {
@@ -730,7 +786,7 @@ app.post('/api/register-device', async (req, res) => {
     }
 
     const result = await pool.query(
-      'INSERT INTO user_devices (userId, token, platform) VALUES ($1, $2, $3) ON CONFLICT (userId, token) DO NOTHING',
+      'INSERT INTO user_devices (userId, token, platform, isActive) VALUES ($1, $2, $3, false) ON CONFLICT (userId, token) DO UPDATE SET platform = EXCLUDED.platform, isActive = EXCLUDED.isActive',
       [userId, token, platform]
     );
 
@@ -937,6 +993,250 @@ app.delete('/api/orders/all', async (req, res) => {
   }
 });
 
+// Combined login-device API (register + activate in one call)
+app.post('/api/login-device', async (req, res) => {
+  try {
+    const { userId, token, platform } = req.body;
+
+    if (!userId || !token) {
+      return res.status(400).json({ success: false, message: 'Missing userId or token' });
+    }
+
+    // Deactivate all devices for this user
+    await pool.query(
+      'UPDATE user_devices SET isActive = false WHERE userId = $1',
+      [userId]
+    );
+
+    // Register/Update and activate this device
+    await pool.query(
+      `INSERT INTO user_devices (userId, token, platform, isActive) 
+       VALUES ($1, $2, $3, true) 
+       ON CONFLICT (userId, token) 
+       DO UPDATE SET platform = EXCLUDED.platform, isActive = true`,
+      [userId, token, platform]
+    );
+
+    console.log(`✅ Device logged in and activated for user ${userId}: ${token.slice(-10)}`);
+    res.json({ 
+      success: true, 
+      message: 'Device logged in and activated as active device' 
+    });
+
+  } catch (error) {
+    console.error('❌ Login device error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Set active device for user
+app.post('/api/set-active-device', async (req, res) => {
+  try {
+    const { userId, token } = req.body;
+
+    if (!userId || !token) {
+      return res.status(400).json({ success: false, message: 'Missing userId or token' });
+    }
+
+    // Deactivate all devices for this user
+    await pool.query(
+      'UPDATE user_devices SET isActive = false WHERE userId = $1',
+      [userId]
+    );
+
+    // Activate only this device
+    await pool.query(
+      'UPDATE user_devices SET isActive = true WHERE userId = $1 AND token = $2',
+      [userId, token]
+    );
+
+    console.log(`✅ Active device set for user ${userId}: ${token.slice(-10)}`);
+    res.json({ success: true, message: 'Active device updated' });
+
+  } catch (error) {
+    console.error('❌ Set active device error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get active device for user
+app.get('/api/active-device/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      [userId]
+    );
+
+    if (result.rows.length > 0) {
+      res.json({ 
+        success: true, 
+        activeToken: result.rows[0].token 
+      });
+    } else {
+      res.json({ 
+        success: false, 
+        message: 'No active device found' 
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Get active device error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Debug Baseel notifications - comprehensive check
+app.get('/api/debug-baseel-notifications', async (req, res) => {
+  try {
+    console.log('🔍 DEBUGGING BASEEL NOTIFICATIONS...');
+    
+    // 1. Check Baseel's user role
+    const baseelRole = userRoles['usr_nazir_001'];
+    console.log('👤 Baseel user role:', baseelRole);
+    
+    // 2. Check all Baseel devices
+    const allDevicesResult = await pool.query(
+      'SELECT token, platform, isActive, createdAt FROM user_devices WHERE userId = $1 ORDER BY createdAt DESC',
+      ['usr_nazir_001']
+    );
+    
+    // 3. Check active devices only
+    const activeDevicesResult = await pool.query(
+      'SELECT token, platform, isActive, createdAt FROM user_devices WHERE userId = $1 AND isActive = true',
+      ['usr_nazir_001']
+    );
+    
+    // 4. Get today's orders created by Baseel
+    const baseelOrdersResult = await pool.query(
+      'SELECT id, createdAt, createdByName FROM orders WHERE userId = $1 AND createdAt >= CURRENT_DATE ORDER BY createdAt DESC',
+      ['usr_nazir_001']
+    );
+    
+    // 5. Get today's orders created by staff (should trigger notifications)
+    const staffOrdersResult = await pool.query(
+      'SELECT id, createdAt, createdByName FROM orders WHERE userId != $1 AND createdAt >= CURRENT_DATE ORDER BY createdAt DESC',
+      ['usr_admin_001']
+    );
+    
+    const debugInfo = {
+      timestamp: new Date().toISOString(),
+      baseelUserInfo: {
+        userId: 'usr_nazir_001',
+        role: baseelRole,
+        shouldReceiveNotifications: baseelRole === 'staff'
+      },
+      deviceInfo: {
+        allDevices: allDevicesResult.rows.map(row => ({
+          token: row.token ? row.token.slice(-10) + '...' : 'NULL',
+          platform: row.platform,
+          isActive: row.isactive,
+          registeredAt: row.createdat
+        })),
+        activeDevices: activeDevicesResult.rows.map(row => ({
+          token: row.token ? row.token.slice(-10) + '...' : 'NULL',
+          platform: row.platform,
+          isActive: row.isactive,
+          registeredAt: row.createdat
+        })),
+        hasActiveDevice: activeDevicesResult.rows.length > 0
+      },
+      orderInfo: {
+        baseelOrdersToday: baseelOrdersResult.rows.length,
+        staffOrdersToday: staffOrdersResult.rows.length,
+        baseelOrders: baseelOrdersResult.rows.map(row => ({
+          id: row.id.slice(-6),
+          createdBy: row.createdbyname,
+          createdAt: row.createdat
+        })),
+        staffOrders: staffOrdersResult.rows.map(row => ({
+          id: row.id.slice(-6),
+          createdBy: row.createdbyname,
+          createdAt: row.createdat
+        }))
+      },
+      notificationLogic: {
+        staffCreatesOrder: baseelRole === 'staff' ? 'Baseel gets notification ✅' : 'Baseel NO notification ❌',
+        adminCreatesOrder: 'Admin manages directly - no notification to Baseel ✅'
+      },
+      recommendations: []
+    };
+    
+    // Add recommendations based on findings
+    if (!debugInfo.deviceInfo.hasActiveDevice) {
+      debugInfo.recommendations.push('❌ Baseel has NO active devices - needs to login to register/activate device');
+    }
+    
+    if (debugInfo.deviceInfo.activeDevices.length === 0 && debugInfo.deviceInfo.allDevices.length > 0) {
+      debugInfo.recommendations.push('⚠️ Baseel has devices but none are active - needs to login again');
+    }
+    
+    if (debugInfo.orderInfo.staffOrdersToday > 0 && debugInfo.deviceInfo.hasActiveDevice) {
+      debugInfo.recommendations.push('✅ Staff orders created today and Baseel has active device - notifications should work');
+    }
+    
+    if (debugInfo.orderInfo.baseelOrdersToday > 0) {
+      debugInfo.recommendations.push('ℹ️ Baseel created orders today - Baseel gets confirmation notifications (not new order notifications)');
+    }
+    
+    console.log('🔍 DEBUG INFO:', JSON.stringify(debugInfo, null, 2));
+    
+    res.json({
+      success: true,
+      debug: debugInfo
+    });
+    
+  } catch (error) {
+    console.error('❌ Debug endpoint error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Manual test notification to Baseel
+app.post('/api/test-baseel-notification', async (req, res) => {
+  try {
+    console.log('🧪 TESTING BASEEL NOTIFICATION...');
+    
+    // Create a test order
+    const testOrder = {
+      id: `TEST${Date.now()}`,
+      items: [{ item: { name: 'Test Jigarthanda' }, quantity: 1, price: 50 }],
+      total: 50,
+      grandTotal: 50,
+      createdAt: new Date()
+    };
+    
+    // Send notification to Baseel
+    await sendPushNotificationToBaseel(testOrder);
+    
+    res.json({
+      success: true,
+      message: 'Test notification sent to Baseel',
+      testOrder: testOrder
+    });
+    
+  } catch (error) {
+    console.error('❌ Test notification error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Manual daily summary test endpoint
+app.post('/api/test-daily-summary', async (req, res) => {
+  try {
+    console.log('🧪 Testing daily summary notification...');
+    await sendDailySummaryToBaseel();
+    res.json({ 
+      success: true, 
+      message: 'Daily summary notification sent to Baseel devices'
+    });
+  } catch (error) {
+    console.error('❌ Daily summary test error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Health
 app.get('/api/health', async (req, res) => {
   try {
@@ -957,9 +1257,35 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+
 /* ===========================
    Start Server
 =========================== */
+
+// Root route - API info
+app.get('/', (req, res) => {
+  res.json({
+    message: '🚀 Jigarthanda POS API running',
+    version: 'v2.3-POST-FIX-2026-03-04-19:50',
+    endpoints: {
+      orders: '/api/orders',
+      stats: '/api/orders/stats',
+      paymentSummary: '/api/orders/payment-summary',
+      orderStatus: '/api/orders/:id/status',
+      settings: '/api/settings',
+      health: '/api/health',
+      registerDevice: '/api/register-device',
+      loginDevice: '/api/login-device',
+      setActiveDevice: '/api/set-active-device',
+      activeDevice: '/api/active-device/:userId',
+      debugBaseel: '/api/debug-baseel-notifications',
+      testBaseelNotification: '/api/test-baseel-notification',
+      testDailySummary: '/api/test-daily-summary'
+    },
+    status: 'production-ready',
+    documentation: 'https://github.com/mohamednazir-tech/jigarthanda-app'
+  });
+});
 
 // Start server
 const startServer = async () => {
@@ -973,23 +1299,32 @@ const startServer = async () => {
       console.log(`🌐 Network: http://10.171.132.69:${PORT}`);
     });
 
-    // Schedule daily cleanup at 12:00 AM (keep old scheduler for cleanup)
-    scheduleOrderCleanup();
-    
-    // Run immediate cleanup on server start (professional behavior)
-    console.log('🧹 Running immediate cleanup on server start...');
-    await cleanupOrders();
-    
-    // Schedule automatic cleanup every 24 hours
-    setInterval(cleanupOrders, 24 * 60 * 60 * 1000); // Run once per day
-    console.log("⏰ Automatic cleanup scheduled every 24 hours");
+  // Schedule daily cleanup using simple interval
+  setInterval(deleteOldOrders, 24 * 60 * 60 * 1000); // Run once per day
+  
+  // Run immediate cleanup on server start (professional behavior)
+  console.log('🧹 Running immediate cleanup on server start...');
+  await deleteOldOrders();
+  
+  console.log("🕐 Daily summary scheduled via cron (12:01 AM daily)");
 
-    console.log("🕐 Daily summary scheduled via cron (12:01 AM daily)");
+    // Backup trigger for Render sleep issues - check if daily summary missed
+    setTimeout(async () => {
+      console.log("🔔 Checking for missed daily summary (backup trigger)...");
+      const now = new Date();
+      const lastRun = new Date();
+      lastRun.setHours(0, 1, 0, 0); // 12:01 AM today
+      
+      if (now.getHours() >= 1 && now.getHours() < 23) {
+        console.log("📅 Server woke up after 12:01 AM - sending missed daily summary");
+        await sendDailySummaryToBaseel();
+      }
+    }, 60000); // Check 1 minute after start
 
-  } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-  }
+} catch (error) {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
+}
 };
 
 startServer();
