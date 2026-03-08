@@ -281,13 +281,9 @@ app.post('/api/orders', async (req, res) => {
       console.log('Created by user ID:', userId);
       console.log('User role from cache:', userRole);
 
-      // Send push notification to Baseel if staff user created order
-      if (userRole === 'staff') {
-        console.log('🔔 Staff user created order - sending notification to Baseel');
-        await sendPushNotificationToBaseel(order);
-      } else {
-        console.log('👤 Admin user created order - no notification to Baseel (admin manages orders directly)');
-      }
+      // Send push notification to Baseel for ALL new orders (both admin and staff)
+      console.log('🔔 New order created - sending notification to Baseel');
+      await sendPushNotificationToBaseel(order);
 
       // Send confirmation to user
       await sendPushNotificationToUser(order, userId);
@@ -1157,8 +1153,9 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
         }))
       },
       notificationLogic: {
-        staffCreatesOrder: baseelRole === 'staff' ? 'Baseel gets notification ✅' : 'Baseel NO notification ❌',
-        adminCreatesOrder: 'Admin manages directly - no notification to Baseel ✅'
+        adminCreatesOrder: 'Baseel gets notification ✅ (to prepare order)',
+        staffCreatesOrder: 'Baseel gets notification ✅ (to prepare order)',
+        baseelCreatesOrder: 'Baseel gets confirmation notification ✅'
       },
       recommendations: []
     };
@@ -1172,12 +1169,16 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
       debugInfo.recommendations.push('⚠️ Baseel has devices but none are active - needs to login again');
     }
     
+    if (debugInfo.orderInfo.baseelOrdersToday > 0) {
+      debugInfo.recommendations.push('✅ Baseel created orders today - Baseel gets confirmation notifications');
+    }
+    
     if (debugInfo.orderInfo.staffOrdersToday > 0 && debugInfo.deviceInfo.hasActiveDevice) {
       debugInfo.recommendations.push('✅ Staff orders created today and Baseel has active device - notifications should work');
     }
     
-    if (debugInfo.orderInfo.baseelOrdersToday > 0) {
-      debugInfo.recommendations.push('ℹ️ Baseel created orders today - Baseel gets confirmation notifications (not new order notifications)');
+    if (debugInfo.orderInfo.baseelOrdersToday > 0 && debugInfo.deviceInfo.hasActiveDevice) {
+      debugInfo.recommendations.push('✅ Admin orders created today and Baseel has active device - notifications should work');
     }
     
     console.log('🔍 DEBUG INFO:', JSON.stringify(debugInfo, null, 2));
