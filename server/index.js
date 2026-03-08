@@ -312,18 +312,19 @@ async function sendPushNotificationToBaseel(order) {
   try {
     console.log('🎯 sendPushNotificationToBaseel called for order:', order.id);
     
-    // Get Baseel's ACTIVE device token only
+    // Get Baseel's device tokens (ACTIVE + INACTIVE) - Baseel should always receive new orders!
     const devicesResponse = await pool.query(
-      'SELECT token, platform, isActive FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token, platform, isActive FROM user_devices WHERE userId = $1',
       ['usr_nazir_001'] // Baseel user ID
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
-    console.log('📱 Baseel active devices found:', tokens.length);
+    console.log('📱 Baseel devices found:', tokens.length);
     console.log('📱 Baseel device tokens:', tokens.map(t => t.slice(-10)));
+    console.log('📱 Baseel device active status:', devicesResponse.rows.map(r => ({token: r.token.slice(-10), active: r.isactive})));
 
     if (tokens.length === 0) {
-      console.log('❌ No active device found for Baseel (usr_nazir_001)');
+      console.log('❌ No devices found for Baseel (usr_nazir_001)');
       return;
     }
 
@@ -1156,13 +1157,13 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
     const baseelRole = userRoles['usr_nazir_001'];
     console.log('👤 Baseel user role:', baseelRole);
     
-    // 2. Check all Baseel devices
+    // 2. Check all Baseel devices (active + inactive)
     const allDevicesResult = await pool.query(
       'SELECT token, platform, isActive, createdAt FROM user_devices WHERE userId = $1 ORDER BY createdAt DESC',
       ['usr_nazir_001']
     );
     
-    // 3. Check active devices only
+    // 3. Check only active devices for comparison
     const activeDevicesResult = await pool.query(
       'SELECT token, platform, isActive, createdAt FROM user_devices WHERE userId = $1 AND isActive = true',
       ['usr_nazir_001']
@@ -1225,24 +1226,28 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
     };
     
     // Add recommendations based on findings
-    if (!debugInfo.deviceInfo.hasActiveDevice) {
-      debugInfo.recommendations.push('❌ Baseel has NO active devices - needs to login to register/activate device');
+    if (debugInfo.deviceInfo.allDevices.length === 0) {
+      debugInfo.recommendations.push('❌ Baseel has NO devices registered - needs to login to register device');
     }
     
-    if (debugInfo.deviceInfo.activeDevices.length === 0 && debugInfo.deviceInfo.allDevices.length > 0) {
-      debugInfo.recommendations.push('⚠️ Baseel has devices but none are active - needs to login again');
+    if (debugInfo.deviceInfo.allDevices.length > 0 && debugInfo.deviceInfo.activeDevices.length === 0) {
+      debugInfo.recommendations.push('⚠️ Baseel has devices but none are active - notifications will still be sent to all devices');
+    }
+    
+    if (debugInfo.deviceInfo.allDevices.length > 0) {
+      debugInfo.recommendations.push('✅ Baseel has devices registered - will receive ALL new order notifications (regardless of active status)');
     }
     
     if (debugInfo.orderInfo.baseelOrdersToday > 0) {
       debugInfo.recommendations.push('✅ Baseel created orders today - Baseel gets confirmation notifications');
     }
     
-    if (debugInfo.orderInfo.staffOrdersToday > 0 && debugInfo.deviceInfo.hasActiveDevice) {
-      debugInfo.recommendations.push('✅ Staff orders created today and Baseel has active device - notifications should work');
+    if (debugInfo.orderInfo.staffOrdersToday > 0 && debugInfo.deviceInfo.allDevices.length > 0) {
+      debugInfo.recommendations.push('✅ Staff orders created today and Baseel has devices - notifications should work');
     }
     
-    if (debugInfo.orderInfo.baseelOrdersToday > 0 && debugInfo.deviceInfo.hasActiveDevice) {
-      debugInfo.recommendations.push('✅ Admin orders created today and Baseel has active device - notifications should work');
+    if (debugInfo.orderInfo.baseelOrdersToday > 0 && debugInfo.deviceInfo.allDevices.length > 0) {
+      debugInfo.recommendations.push('✅ Admin orders created today and Baseel has devices - notifications should work');
     }
     
     console.log('🔍 DEBUG INFO:', JSON.stringify(debugInfo, null, 2));
