@@ -285,6 +285,12 @@ app.post('/api/orders', async (req, res) => {
     console.log('🔔 New order created - sending notification to Baseel');
     console.log('📱 Order created by:', userId, '(', userRole, ')');
     console.log('🎯 Sending NEW ORDER notification to Baseel (usr_nazir_001)');
+    
+    // Debug: Check if order creator is Baseel
+    if (userId === 'usr_nazir_001') {
+      console.log('🔍 Order created by Baseel - should still receive notification on other devices');
+    }
+    
     await sendPushNotificationToBaseel(order);
 
     // Send confirmation to user who created order
@@ -319,13 +325,16 @@ async function sendPushNotificationToBaseel(order) {
     );
     
     const tokens = devicesResponse.rows.map(row => row.token);
+    
+    console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
+    console.log('📱 Device tokens:', tokens.map(t => t.slice(-10)));
 
-  if (tokens.length === 0) {
+    if (tokens.length === 0) {
       console.log('❌ No active devices found for Baseel - notifications disabled');
       return;
     }
 
-    console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
+    console.log('📱 Found', tokens.length, 'active Baseel devices - sending notifications to all');
 
     // Send push notifications to ALL active devices in PARALLEL for better performance
     // Prepare notification data once
