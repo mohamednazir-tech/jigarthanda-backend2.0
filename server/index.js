@@ -943,6 +943,146 @@ app.get('/api/orders/stats', async (req, res) => {
   }
 });
 
+// Baseel-specific sales report - high and low sale items
+app.get('/api/baseel-sales-report', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    
+    // Security: Only allow Baseel user to access this report
+    if (userId !== 'usr_nazir_001') {
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Access denied - Baseel only' 
+      });
+    }
+    
+    console.log('📊 Generating Baseel sales report for user:', userId);
+    
+    // Get today's sales data with item frequencies
+    const salesDataQuery = `
+      SELECT 
+        o.items,
+        o.total,
+        o.createdAt,
+        o.paymentMethod
+      FROM orders o
+      WHERE o.createdAt >= CURRENT_DATE
+        AND o.total > 0
+      ORDER BY o.createdAt DESC
+    `;
+    
+    const salesResult = await pool.query(salesDataQuery);
+    const orders = salesResult.rows;
+    
+    // Parse items and calculate frequencies
+    const itemStats = {};
+    const timeStats = { morning: 0, afternoon: 0, evening: 0, night: 0 };
+    let totalRevenue = 0;
+    
+    orders.forEach(order => {
+      const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+      const hour = new Date(order.createdat).getHours();
+      
+      // Categorize by time
+      if (hour >= 6 && hour < 12) timeStats.morning++;
+      else if (hour >= 12 && hour < 17) timeStats.afternoon++;
+      else if (hour >= 17 && hour < 21) timeStats.evening++;
+      else timeStats.night++;
+      
+      totalRevenue += parseFloat(order.total);
+      
+      // Count item frequencies
+      items.forEach(item => {
+        const itemName = item.item.name;
+        if (!itemStats[itemName]) {
+          itemStats[itemName] = {
+            name: itemName,
+            count: 0,
+            revenue: 0,
+            avgPrice: 0
+          };
+        }
+        itemStats[itemName].count += item.quantity;
+        itemStats[itemName].revenue += (item.price * item.quantity);
+      });
+    });
+    
+    // Calculate average prices and sort
+    const itemsArray = Object.values(itemStats).map(item => ({
+      ...item,
+      avgPrice: item.revenue / item.count
+    }));
+    
+    // Sort by revenue (high to low)
+    const highSaleItems = itemsArray
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+    
+    // Sort by count (low to high)
+    const lowSaleItems = itemsArray
+      .sort((a, b) => a.count - b.count)
+      .slice(0, 10);
+    
+    const report = {
+      timestamp: new Date().toISOString(),
+      date: new Date().toISOString().split('T')[0],
+      summary: {
+        totalOrders: orders.length,
+        totalRevenue: Math.round(totalRevenue * 100) / 100,
+        avgOrderValue: Math.round((totalRevenue / orders.length) * 100) / 100,
+        uniqueItems: itemsArray.length,
+        peakTime: Object.keys(timeStats).reduce((a, b) => 
+          timeStats[a] > timeStats[b] ? a : b
+        )
+      },
+      timeAnalysis: {
+        morning: { count: timeStats.morning, percentage: Math.round((timeStats.morning / orders.length) * 100) },
+        afternoon: { count: timeStats.afternoon, percentage: Math.round((timeStats.afternoon / orders.length) * 100) },
+        evening: { count: timeStats.evening, percentage: Math.round((timeStats.evening / orders.length) * 100) },
+        night: { count: timeStats.night, percentage: Math.round((timeStats.night / orders.length) * 100) }
+      },
+      highSaleItems: highSaleItems.map(item => ({
+        rank: highSaleItems.indexOf(item) + 1,
+        name: item.name,
+        unitsSold: item.count,
+        revenue: Math.round(item.revenue * 100) / 100,
+        avgPrice: Math.round(item.avgPrice * 100) / 100,
+        performance: item.revenue > totalRevenue / itemsArray.length ? '🔥 Above Average' : '📊 Average'
+      })),
+      lowSaleItems: lowSaleItems.map(item => ({
+        rank: lowSaleItems.indexOf(item) + 1,
+        name: item.name,
+        unitsSold: item.count,
+        revenue: Math.round(item.revenue * 100) / 100,
+        avgPrice: Math.round(item.avgPrice * 100) / 100,
+        recommendation: item.count < 2 ? '🚀 Promote This Item' : '📈 Monitor Sales'
+      })),
+      insights: {
+        topPerformer: highSaleItems[0]?.name || 'No data',
+        worstPerformer: lowSaleItems[0]?.name || 'No data',
+        revenueConcentration: Math.round((highSaleItems[0]?.revenue || 0) / totalRevenue * 100),
+        recommendation: totalRevenue > 1000 ? '🎉 Excellent Sales Day!' : 
+                      totalRevenue > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
+      }
+    };
+    
+    console.log('📊 Baseel sales report generated:', {
+      totalOrders: report.summary.totalOrders,
+      totalRevenue: report.summary.totalRevenue,
+      topItem: report.insights.topPerformer
+    });
+    
+    res.json({
+      success: true,
+      report: report
+    });
+    
+  } catch (error) {
+    console.error('❌ Baseel sales report error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get payment method summary for daily reports
 app.get('/api/orders/payment-summary', async (req, res) => {
   try {
@@ -1351,6 +1491,7 @@ app.get('/', (req, res) => {
       debugBaseel: '/api/debug-baseel-notifications',
       testBaseelNotification: '/api/test-baseel-notification',
       allDeviceTokens: '/api/all-device-tokens',
+      baseelSalesReport: '/api/baseel-sales-report',
       testDailySummary: '/api/test-daily-summary'
     },
     status: 'production-ready',
