@@ -281,7 +281,25 @@ app.post('/api/orders', async (req, res) => {
       console.log('Created by user ID:', userId);
       console.log('User role from cache:', userRole);
 
-      // Send push notification to Baseel for ALL new orders (both admin and staff)
+      // Test: Add a Baseel device manually for testing
+app.post('/test-add-baseel-device', async (req, res) => {
+  try {
+    const testToken = 'ExponentPushToken[test_' + Date.now();
+    
+    await pool.query(
+      'INSERT INTO user_devices (userid, token, platform, isactive) VALUES ($1, $2, $3, true) ON CONFLICT (token) DO UPDATE SET isactive = true',
+      ['usr_nazir_001', testToken, 'android']
+    );
+    
+    console.log('✅ Test Baseel device added:', testToken);
+    res.json({ success: true, message: 'Test device added' });
+  } catch (error) {
+    console.error('❌ Test device addition failed:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send push notification to Baseel for ALL new orders (both admin and staff)
     console.log('🔔 New order created - sending notification to Baseel');
     console.log('📱 Order created by:', userId, '(', userRole, ')');
     console.log('🎯 Sending NEW ORDER notification to Baseel (usr_nazir_001)');
@@ -320,7 +338,7 @@ async function sendPushNotificationToBaseel(order) {
     
     // Get Baseel's ACTIVE device tokens only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
       ['usr_nazir_001'] // Baseel user ID
     );
     
@@ -410,7 +428,7 @@ async function sendPushNotificationToUser(order, userId) {
     
     // Get user's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token, platform, isActive FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token, platform, isactive FROM user_devices WHERE userid = $1 AND isactive = true',
       [userId]
     );
 
@@ -506,7 +524,7 @@ async function sendDailySummaryToBaseel() {
 
     // Get Baseel's ACTIVE device token only
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
       ['usr_nazir_001']
     );
 
@@ -811,7 +829,7 @@ app.post('/register-device', async (req, res) => {
     console.log('📱 Device registration request:', { userId, token: token.slice(-10), platform });
 
     await pool.query(
-      'INSERT INTO user_devices (userId, token, platform, isActive) VALUES ($1, $2, $3, true) ON CONFLICT (userId, token) DO UPDATE SET isActive = true, platform = EXCLUDED.platform',
+      'INSERT INTO user_devices (userid, token, platform, isactive) VALUES ($1, $2, $3, true) ON CONFLICT (userid, token) DO UPDATE SET isactive = true, platform = EXCLUDED.platform',
       [userId, token, platform]
     );
 
@@ -830,7 +848,7 @@ app.post('/logout-device', async (req, res) => {
     console.log('📱 Device logout request:', { token: token.slice(-10) });
 
     const result = await pool.query(
-      'UPDATE user_devices SET isActive = false WHERE token = $1',
+      'UPDATE user_devices SET isactive = false WHERE token = $1',
       [token]
     );
 
@@ -1207,16 +1225,16 @@ app.post('/api/login-device', async (req, res) => {
 
     // Deactivate all devices for this user
     await pool.query(
-      'UPDATE user_devices SET isActive = false WHERE userId = $1',
+      'UPDATE user_devices SET isactive = false WHERE userid = $1',
       [userId]
     );
 
     // Register/Update and activate this device
     await pool.query(
-      `INSERT INTO user_devices (userId, token, platform, isActive) 
+      `INSERT INTO user_devices (userid, token, platform, isactive) 
        VALUES ($1, $2, $3, true) 
-       ON CONFLICT (userId, token) 
-       DO UPDATE SET platform = EXCLUDED.platform, isActive = true`,
+       ON CONFLICT (userid, token) 
+       DO UPDATE SET platform = EXCLUDED.platform, isactive = true`,
       [userId, token, platform]
     );
 
@@ -1243,13 +1261,13 @@ app.post('/api/set-active-device', async (req, res) => {
 
     // Deactivate all devices for this user
     await pool.query(
-      'UPDATE user_devices SET isActive = false WHERE userId = $1',
+      'UPDATE user_devices SET isactive = false WHERE userid = $1',
       [userId]
     );
 
     // Activate only this device
     await pool.query(
-      'UPDATE user_devices SET isActive = true WHERE userId = $1 AND token = $2',
+      'UPDATE user_devices SET isactive = true WHERE userid = $1 AND token = $2',
       [userId, token]
     );
 
@@ -1268,7 +1286,7 @@ app.get('/api/active-device/:userId', async (req, res) => {
     const { userId } = req.params;
 
     const result = await pool.query(
-      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
       [userId]
     );
 
@@ -1354,13 +1372,13 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
     
     // 2. Check all Baseel devices (active + inactive)
     const allDevicesResult = await pool.query(
-      'SELECT token, platform, isActive, createdAt FROM user_devices WHERE userId = $1 ORDER BY createdAt DESC',
+      'SELECT token, platform, isactive, createdAt FROM user_devices WHERE userid = $1 ORDER BY createdAt DESC',
       ['usr_nazir_001']
     );
     
     // 3. Check only active devices for comparison
     const activeDevicesResult = await pool.query(
-      'SELECT token, platform, isActive, createdAt FROM user_devices WHERE userId = $1 AND isActive = true',
+      'SELECT token, platform, isactive, createdAt FROM user_devices WHERE userid = $1 AND isactive = true',
       ['usr_nazir_001']
     );
     
