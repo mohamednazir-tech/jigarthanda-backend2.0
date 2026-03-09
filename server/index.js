@@ -581,8 +581,8 @@ function scheduleDailySummaryFallback() {
 
 // Schedule daily summary using cron (production-grade)
 if (cron) {
-  cron.schedule('1 0 * * *', async () => {
-    console.log('📅 Running daily summary via cron (12:01 AM)');
+  cron.schedule('30 23 * * *', async () => {
+    console.log('📅 Running daily summary via cron (11:30 PM)');
     await sendDailySummaryToBaseel();
   });
 } else {
@@ -958,7 +958,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     
     console.log('📊 Generating Baseel sales report for user:', userId);
     
-    // Get today's sales data with item frequencies
+    // Get last 3 days sales data with item frequencies
     const salesDataQuery = `
       SELECT 
         o.items,
@@ -966,7 +966,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         o.createdAt,
         o.paymentMethod
       FROM orders o
-      WHERE o.createdAt >= CURRENT_DATE
+      WHERE o.createdAt >= NOW() - INTERVAL '3 days'
         AND o.total > 0
       ORDER BY o.createdAt DESC
     `;
@@ -994,6 +994,8 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       // Count item frequencies
       items.forEach(item => {
         const itemName = item.item.name;
+        const itemPrice = parseFloat(item.item.price) || 0;
+        
         if (!itemStats[itemName]) {
           itemStats[itemName] = {
             name: itemName,
@@ -1003,7 +1005,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
           };
         }
         itemStats[itemName].count += item.quantity;
-        itemStats[itemName].revenue += (item.price * item.quantity);
+        itemStats[itemName].revenue += (itemPrice * item.quantity);
       });
     });
     
@@ -1013,19 +1015,21 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       avgPrice: item.revenue / item.count
     }));
     
-    // Sort by revenue (high to low)
-    const highSaleItems = itemsArray
+    // Sort by revenue (high to low) for ranking
+    const allItemsRanked = itemsArray
       .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 10);
-    
-    // Sort by count (low to high)
-    const lowSaleItems = itemsArray
-      .sort((a, b) => a.count - b.count)
-      .slice(0, 10);
+      .map((item, index) => ({
+        rank: index + 1,
+        name: item.name,
+        unitsSold: item.count,
+        revenue: Math.round(item.revenue * 100) / 100,
+        avgPrice: Math.round(item.avgPrice * 100) / 100,
+        performance: item.revenue > totalRevenue / itemsArray.length ? '🔥 Top Performer' : '📊 Good Seller'
+      }));
     
     const report = {
       timestamp: new Date().toISOString(),
-      date: new Date().toISOString().split('T')[0],
+      date: `Last 3 Days (${new Date().toISOString().split('T')[0]})`,
       summary: {
         totalOrders: orders.length,
         totalRevenue: Math.round(totalRevenue * 100) / 100,
@@ -1041,26 +1045,11 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         evening: { count: timeStats.evening, percentage: Math.round((timeStats.evening / orders.length) * 100) },
         night: { count: timeStats.night, percentage: Math.round((timeStats.night / orders.length) * 100) }
       },
-      highSaleItems: highSaleItems.map(item => ({
-        rank: highSaleItems.indexOf(item) + 1,
-        name: item.name,
-        unitsSold: item.count,
-        revenue: Math.round(item.revenue * 100) / 100,
-        avgPrice: Math.round(item.avgPrice * 100) / 100,
-        performance: item.revenue > totalRevenue / itemsArray.length ? '🔥 Above Average' : '📊 Average'
-      })),
-      lowSaleItems: lowSaleItems.map(item => ({
-        rank: lowSaleItems.indexOf(item) + 1,
-        name: item.name,
-        unitsSold: item.count,
-        revenue: Math.round(item.revenue * 100) / 100,
-        avgPrice: Math.round(item.avgPrice * 100) / 100,
-        recommendation: item.count < 2 ? '🚀 Promote This Item' : '📈 Monitor Sales'
-      })),
+      allItemsRanked: allItemsRanked,
       insights: {
-        topPerformer: highSaleItems[0]?.name || 'No data',
-        worstPerformer: lowSaleItems[0]?.name || 'No data',
-        revenueConcentration: Math.round((highSaleItems[0]?.revenue || 0) / totalRevenue * 100),
+        topPerformer: allItemsRanked[0]?.name || 'No data',
+        worstPerformer: allItemsRanked[allItemsRanked.length - 1]?.name || 'No data',
+        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / totalRevenue * 100),
         recommendation: totalRevenue > 1000 ? '🎉 Excellent Sales Day!' : 
                       totalRevenue > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
       }
