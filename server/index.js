@@ -291,49 +291,48 @@ app.post('/api/orders', async (req, res) => {
     console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
     await sendPushNotificationToUser(order, userId);
 
-      res.json({ success: true, message: 'Order created', order });
+    res.json({ success: true, message: 'Order created', order });
 
-    } catch (error) {
-      await client.query('ROLLBACK');
-      console.error('❌ Transaction rolled back:', error);
-      throw error;
-    } finally {
-      client.release();
-    }
   } catch (error) {
-    console.error('=== ORDER CREATION ERROR ===');
-    console.error('Error details:', error);
-    res.status(500).json({ success: false, error: error.message });
+    await client.query('ROLLBACK');
+    console.error('❌ Transaction rolled back:', error);
+    throw error;
+  } finally {
+    client.release();
   }
+} catch (error) {
+  console.error('=== ORDER CREATION ERROR ===');
+  console.error('Error details:', error);
+  res.status(500).json({ success: false, error: error.message });
+}
 });
 
-// Send push notification to Baseel
+// Send push notification to Baseel (only to active devices)
 async function sendPushNotificationToBaseel(order) {
   try {
     console.log('🎯 sendPushNotificationToBaseel called for order:', order.id);
     
-    // Get Baseel's device tokens (ACTIVE + INACTIVE) - Baseel should always receive new orders!
+    // Get Baseel's ACTIVE device tokens only
     const devicesResponse = await pool.query(
-      'SELECT token, platform, isActive FROM user_devices WHERE userId = $1',
+      'SELECT token FROM user_devices WHERE userId = $1 AND isActive = true',
       ['usr_nazir_001'] // Baseel user ID
     );
-
+    
     const tokens = devicesResponse.rows.map(row => row.token);
-    console.log('📱 Baseel devices found:', tokens.length);
-    console.log('📱 Baseel device tokens:', tokens.map(t => t.slice(-10)));
-    console.log('📱 Baseel device active status:', devicesResponse.rows.map(r => ({token: r.token.slice(-10), active: r.isactive})));
 
-    if (tokens.length === 0) {
-      console.log('❌ No devices found for Baseel (usr_nazir_001)');
+  if (tokens.length === 0) {
+      console.log('❌ No active devices found for Baseel - notifications disabled');
       return;
     }
 
-    // Send push notifications to ALL devices in PARALLEL for better performance
+    console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
+
+    // Send push notifications to ALL active devices in PARALLEL for better performance
     // Prepare notification data once
     const items = typeof order.items === "string"
       ? JSON.parse(order.items)
       : order.items;
-    const itemNames = items.map(i => i.item.name).slice(0, 3);
+    const itemNames = items.map(item => item.item.name).slice(0, 3);
     const itemsText = itemNames.length > 2 
       ? `${itemNames.join(', ')} + ${items.length - 2} more`
       : itemNames.join(', ');
@@ -346,29 +345,35 @@ async function sendPushNotificationToBaseel(order) {
 
     const notificationPromises = tokens.map(async (token) => {
       try {
+        // Skip invalid tokens to prevent push errors
+        if (!token.startsWith('ExponentPushToken')) {
+          console.log(`⚠️ Skipping invalid token: ${token.slice(-10)}`);
+          return { success: false, token: token.slice(-10), error: 'Invalid token format' };
+        }
+        
         await axios.post(
           'https://exp.host/--/api/v2/push/send',
           {
             to: token,
             sound: 'default',
-            title: '🔔 NEW ORDER RECEIVED',
-            body: `📋 Order #${order.id.slice(-6)}\n🍹 ${itemsText}\n💰 ₹${order.total}\n🕐 ${orderTime}`,
+            title: '🧾 New Order - Hanifa Jigarthanda',
+            body: `${itemsText} • ₹${order.grandTotal} • ${orderTime}`,
             data: { 
               orderId: order.id,
               type: 'new_order',
-              screen: 'orders',
-              priority: 'urgent'
+              userId: order.userId,
+              total: order.grandTotal,
+              items: itemsText,
+              time: orderTime
             },
             priority: 'high',
-            badge: 1,
-            channelId: 'orders'
           },
           { timeout: 5000 }
         );
-        console.log(`✅ Push notification sent to device: ${token.slice(-10)}`);
+        console.log(`✅ Push notification sent to active device: ${token.slice(-10)}`);
         return { success: true, token: token.slice(-10) };
       } catch (error) {
-        console.error(`❌ Push failed for device ${token.slice(-10)}:`, error.message);
+        console.error(`❌ Push failed for active device ${token.slice(-10)}:`, error.message);
         return { success: false, token: token.slice(-10), error: error.message };
       }
     });
@@ -380,9 +385,9 @@ async function sendPushNotificationToBaseel(order) {
     const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
     const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
     
-    console.log(`📊 Parallel notification results: ${successful} successful, ${failed} failed`);
+    console.log(`📊 Active device notification results: ${successful} successful, ${failed} failed`);
 
-    console.log('✅ Push notification sent to Baseel devices:', tokens.length);
+    console.log('✅ Push notification sent to active Baseel devices:', tokens.length);
 
   } catch (error) {
     console.error('❌ Push notification error:', error);
@@ -515,6 +520,12 @@ async function sendDailySummaryToBaseel() {
     // Send daily summary notifications to ALL devices in PARALLEL for better performance
     const notificationPromises = tokens.map(async (token) => {
       try {
+        // Skip invalid tokens to prevent push errors
+        if (!token.startsWith('ExponentPushToken')) {
+          console.log(`⚠️ Skipping invalid daily summary token: ${token.slice(-10)}`);
+          return { success: false, token: token.slice(-10), error: 'Invalid token format' };
+        }
+        
         await axios.post(
           'https://exp.host/--/api/v2/push/send',
           {
@@ -785,25 +796,45 @@ app.get('/api/settings', async (req, res) => {
 });
 
 // Register device for push notifications
-app.post('/api/register-device', async (req, res) => {
+app.post('/register-device', async (req, res) => {
   try {
     const { userId, token, platform } = req.body;
+    console.log('📱 Device registration request:', { userId, token: token.slice(-10), platform });
 
-    if (!userId || !token) {
-      return res.status(400).json({ success: false, message: 'Missing userId or token' });
-    }
-
-    const result = await pool.query(
-      'INSERT INTO user_devices (userId, token, platform, isActive) VALUES ($1, $2, $3, false) ON CONFLICT (userId, token) DO UPDATE SET platform = EXCLUDED.platform, isActive = EXCLUDED.isActive',
+    await pool.query(
+      'INSERT INTO user_devices (userId, token, platform, isActive) VALUES ($1, $2, $3, true) ON CONFLICT (userId, token) DO UPDATE SET isActive = true, platform = EXCLUDED.platform',
       [userId, token, platform]
     );
 
-    console.log('✅ Device registered:', userId);
+    console.log('✅ Device registered successfully for user:', userId);
     res.json({ success: true, message: 'Device registered successfully' });
-
   } catch (error) {
     console.error('❌ Device registration error:', error);
-    res.status(500).json({ success: false, message: 'Registration failed' });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Logout device - deactivate device on logout
+app.post('/logout-device', async (req, res) => {
+  try {
+    const { token } = req.body;
+    console.log('📱 Device logout request:', { token: token.slice(-10) });
+
+    const result = await pool.query(
+      'UPDATE user_devices SET isActive = false WHERE token = $1',
+      [token]
+    );
+
+    if (result.rowCount > 0) {
+      console.log('✅ Device deactivated successfully');
+      res.json({ success: true, message: 'Device deactivated successfully' });
+    } else {
+      console.log('⚠️ Device not found for deactivation');
+      res.json({ success: false, message: 'Device not found' });
+    }
+  } catch (error) {
+    console.error('❌ Device logout error:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -964,24 +995,38 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         o.items,
         o.total,
         o.createdAt,
-        o.paymentMethod
+        o.paymentMethod,
+        o.id,
+        o.grandTotal
       FROM orders o
       WHERE o.createdAt >= NOW() - INTERVAL '3 days'
-        AND o.total > 0
       ORDER BY o.createdAt DESC
     `;
     
     const salesResult = await pool.query(salesDataQuery);
     const orders = salesResult.rows;
     
+    console.log('📊 Found orders for last 3 days:', orders.length);
+    
     // Parse items and calculate frequencies
     const itemStats = {};
     const timeStats = { morning: 0, afternoon: 0, evening: 0, night: 0 };
     let totalRevenue = 0;
+    let validOrderCount = 0;
+    const revenueByDate = {};
     
     orders.forEach(order => {
       const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
       const hour = new Date(order.createdat).getHours();
+      const orderDate = new Date(order.createdat).toISOString().split('T')[0];
+      
+      // Initialize date revenue tracking
+      if (!revenueByDate[orderDate]) {
+        revenueByDate[orderDate] = 0;
+      }
+      
+      // Log order details for debugging
+      console.log(`🔍 Order ${order.id}: total=${order.total}, grandTotal=${order.grandTotal}, date=${orderDate}`);
       
       // Categorize by time
       if (hour >= 6 && hour < 12) timeStats.morning++;
@@ -989,7 +1034,16 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       else if (hour >= 17 && hour < 21) timeStats.evening++;
       else timeStats.night++;
       
-      totalRevenue += parseFloat(order.total);
+      // Use grandTotal if available, otherwise total
+      const orderTotal = parseFloat(order.grandTotal || order.total);
+      if (!isNaN(orderTotal) && orderTotal > 0) {
+        totalRevenue += orderTotal;
+        revenueByDate[orderDate] += orderTotal;
+        validOrderCount++;
+        console.log(`✅ Added revenue: ${orderTotal} for order ${order.id}, date ${orderDate}`);
+      } else {
+        console.log('⚠️ Invalid order total:', order.total, 'for order:', order.id);
+      }
       
       // Count item frequencies
       items.forEach(item => {
@@ -1033,7 +1087,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       summary: {
         totalOrders: orders.length,
         totalRevenue: Math.round(totalRevenue * 100) / 100,
-        avgOrderValue: Math.round((totalRevenue / orders.length) * 100) / 100,
+        avgOrderValue: validOrderCount > 0 ? Math.round((totalRevenue / validOrderCount) * 100) / 100 : 0,
         uniqueItems: itemsArray.length,
         peakTime: Object.keys(timeStats).reduce((a, b) => 
           timeStats[a] > timeStats[b] ? a : b
@@ -1057,8 +1111,11 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     
     console.log('📊 Baseel sales report generated:', {
       totalOrders: report.summary.totalOrders,
+      validOrderCount: validOrderCount,
       totalRevenue: report.summary.totalRevenue,
-      topItem: report.insights.topPerformer
+      avgOrderValue: report.summary.avgOrderValue,
+      topItem: report.insights.topPerformer,
+      revenueByDate: revenueByDate
     });
     
     res.json({
