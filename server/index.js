@@ -57,12 +57,11 @@ app.use(express.json());
 
 const createTables = async () => {
   try {
-    // Create users table
+    // Create users table (without email since project doesn't use it)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(50) PRIMARY KEY,
         username VARCHAR(100) UNIQUE NOT NULL,
-        email VARCHAR(100) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         role VARCHAR(20) DEFAULT 'user',
         createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -1705,29 +1704,28 @@ app.post('/api/update-password', async (req, res) => {
 // Temporary endpoint to create test user
 app.post('/api/create-test-user', async (req, res) => {
   try {
-    const { userId, username, email, password, role } = req.body;
+    const { userId, username, password, role } = req.body;
     
-    if (!userId || !username || !email || !password) {
+    if (!userId || !username || !password) {
       return res.status(400).json({ 
         success: false, 
-        message: 'All fields are required' 
+        message: 'User ID, username, and password are required' 
       });
     }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert user
+    // Insert user (without email since project doesn't use it)
     await pool.query(`
-      INSERT INTO users (id, username, email, password, role, createdAt, updatedAt)
-      VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      INSERT INTO users (id, username, password, role, createdAt, updatedAt)
+      VALUES ($1, $2, $3, $4, NOW(), NOW())
       ON CONFLICT (id) DO UPDATE SET
         username = EXCLUDED.username,
-        email = EXCLUDED.email,
         password = EXCLUDED.password,
         role = EXCLUDED.role,
         updatedAt = NOW()
-    `, [userId, username, email, hashedPassword, role || 'admin']);
+    `, [userId, username, hashedPassword, role || 'admin']);
 
     console.log(`✅ Test user created: ${username} (${userId})`);
     
