@@ -3,6 +3,8 @@ const cors = require('cors');
 const axios = require('axios');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 // Environment safety check
@@ -323,6 +325,18 @@ app.post('/test-add-baseel-device', async (req, res) => {
     }
     
     await sendPushNotificationToBaseel(order);
+
+    // 🔥 Send real-time WebSocket update
+    if (global.io) {
+      global.io.to('baseel-orders').emit('new-order', {
+        id: order.id,
+        items: order.items,
+        total: order.total,
+        customer: order.customer_name || 'Walk-in',
+        timestamp: new Date().toISOString()
+      });
+      console.log('📡 Real-time order emitted to Baseel devices');
+    }
 
     // Send confirmation to user who created order
     console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
@@ -1873,8 +1887,44 @@ const startServer = async () => {
   try {
     await createTables();
     
-    // Start HTTP server
-    app.listen(PORT, async () => {
+    // Create HTTP server with WebSocket support
+    const server = createServer(app);
+    const io = new Server(server, {
+      cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+      }
+    });
+
+    // WebSocket connection handling
+    io.on('connection', (socket) => {
+      console.log('🔌 WebSocket client connected:', socket.id);
+      
+      // Join user to their personal room
+      const userId = socket.handshake.auth.userId;
+      if (userId) {
+        socket.join(`user-${userId}`);
+        console.log(`👤 User ${userId} joined their room`);
+      }
+
+      // Handle real-time events
+      socket.on('join-orders', () => {
+        if (userId === 'usr_nazir_001') {
+          socket.join('baseel-orders');
+          console.log('📱 Baseel joined orders room');
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('🔌 WebSocket client disconnected:', socket.id);
+      });
+    });
+
+    // Make io globally available for order emission
+    global.io = io;
+
+    // Start HTTP server with WebSocket support
+    server.listen(PORT, async () => {
       console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
       console.log(`📊 Local: http://localhost:${PORT}`);
       console.log(`🌐 Network: http://10.171.132.69:${PORT}`);
