@@ -56,6 +56,19 @@ app.use(express.json());
 
 const createTables = async () => {
   try {
+    // Create users table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(50) PRIMARY KEY,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        role VARCHAR(20) DEFAULT 'user',
+        createdAt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updatedAt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      )
+    `);
+
     // Create orders table with all required columns
     await pool.query(`
       CREATE TABLE IF NOT EXISTS orders (
@@ -1572,11 +1585,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// Start server
-const startServer = async () => {
-  try {
-    await createTables();
-    
 // Update Username Endpoint
 app.post('/api/update-username', async (req, res) => {
   try {
@@ -1693,157 +1701,46 @@ app.post('/api/update-password', async (req, res) => {
   }
 });
 
-// Start HTTP server
-    app.listen(PORT, () => {
+// Start server
+const startServer = async () => {
+  try {
+    await createTables();
+    
+    // Start HTTP server
+    app.listen(PORT, async () => {
       console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
       console.log(`📊 Local: http://localhost:${PORT}`);
       console.log(`🌐 Network: http://10.171.132.69:${PORT}`);
-    });
 
-  // Schedule daily cleanup using simple interval
-  setInterval(deleteOldOrders, 24 * 60 * 60 * 1000); // Run once per day
-  
-  // Run immediate cleanup on server start (professional behavior)
-  console.log('🧹 Running immediate cleanup on server start...');
-  await deleteOldOrders();
-  
-  console.log("🕐 Daily summary scheduled via cron (12:01 AM daily)");
-
-    // Backup trigger for Render sleep issues - check if daily summary missed
-    setTimeout(async () => {
-      console.log("🔔 Checking for missed daily summary (backup trigger)...");
-      const now = new Date();
-      const lastRun = new Date();
-      lastRun.setHours(0, 1, 0, 0); // 12:01 AM today
+      // Schedule daily cleanup using simple interval
+      setInterval(deleteOldOrders, 24 * 60 * 60 * 1000); // Run once per day
       
-      if (now.getHours() >= 1 && now.getHours() < 23) {
-        console.log("📅 Server woke up after 12:01 AM - sending missed daily summary");
-        await sendDailySummaryToBaseel();
-      }
-    }, 60000); // Check 1 minute after start
+      // Run immediate cleanup on server start (professional behavior)
+      console.log('🧹 Running immediate cleanup on server start...');
+      await deleteOldOrders();
+      
+      console.log("🕐 Daily summary scheduled via cron (12:01 AM daily)");
 
-} catch (error) {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
-}
+      // Backup trigger for Render sleep issues - check if daily summary missed
+      setTimeout(async () => {
+        console.log("🔔 Checking for missed daily summary (backup trigger)...");
+        const now = new Date();
+        const lastRun = new Date();
+        lastRun.setHours(0, 1, 0, 0); // 12:01 AM today
+        
+        if (now.getHours() >= 1 && now.getHours() < 23) {
+          console.log("📅 Server woke up after 12:01 AM - sending missed daily summary");
+          await sendDailySummaryToBaseel();
+        }
+      }, 60000); // Check 1 minute after start
+
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
 };
 
 startServer();
-});
-
-// Update Username Endpoint
-  try {
-    const { userId, newUsername } = req.body;
-    
-    if (!userId || !newUsername) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'User ID and new username are required' 
-      });
-    }
-
-    // Check if username already exists
-    const existingUser = await pool.query(
-      'SELECT id FROM users WHERE username = $1 AND id != $2',
-      [newUsername, userId]
-    );
-
-    if (existingUser.rows.length > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Username already exists' 
-      });
-    }
-
-    // Update username
-    await pool.query(
-      'UPDATE users SET username = $1 WHERE id = $2',
-      [newUsername, userId]
-    );
-
-    console.log(`✅ Username updated for user: ${userId} -> ${newUsername}`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Username updated successfully' 
-    });
-
-  } catch (error) {
-    console.error('❌ Username update error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error' 
-    });
-  }
-});
-
-// Update Password Endpoint
-app.post('/api/update-password', async (req, res) => {
-  try {
-    const { userId, currentPassword, newPassword } = req.body;
-    
-    if (!userId || !currentPassword || !newPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'All fields are required' 
-      });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'New password must be at least 6 characters' 
-      });
-    }
-
-    // Get current user password
-    const userResult = await pool.query(
-      'SELECT password FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'User not found' 
-      });
-    }
-
-    const user = userResult.rows[0];
-
-    // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
-    
-    if (!isCurrentPasswordValid) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Current password is incorrect' 
-      });
-    }
-
-    // Hash new password
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update password
-    await pool.query(
-      'UPDATE users SET password = $1 WHERE id = $2',
-      [hashedNewPassword, userId]
-    );
-
-    console.log(`✅ Password updated for user: ${userId}`);
-    
-    res.json({ 
-      success: true, 
-      message: 'Password updated successfully' 
-    });
-
-  } catch (error) {
-    console.error('❌ Password update error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error' 
-    });
-  }
-});
 
 module.exports = app;
