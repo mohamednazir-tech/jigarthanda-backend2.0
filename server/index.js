@@ -1743,6 +1743,55 @@ app.post('/api/create-test-user', async (req, res) => {
   }
 });
 
+// Temporary endpoint to reset user passwords to correct values
+app.post('/api/reset-user-passwords', async (req, res) => {
+  try {
+    // Reset passwords to match mocks/users.ts
+    const users = [
+      {
+        id: 'usr_admin_001',
+        username: 'admin',
+        password: 'admin123',
+        role: 'staff'
+      },
+      {
+        id: 'usr_nazir_001', 
+        username: 'baseel',
+        password: 'baseel123',
+        role: 'admin'
+      }
+    ];
+
+    for (const user of users) {
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+      
+      await pool.query(`
+        INSERT INTO users (id, username, password, role, createdAt, updatedAt)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          username = EXCLUDED.username,
+          password = EXCLUDED.password,
+          role = EXCLUDED.role,
+          updatedAt = NOW()
+      `, [user.id, user.username, hashedPassword, user.role]);
+    }
+
+    console.log('✅ User passwords reset to match mocks/users.ts');
+    
+    res.json({ 
+      success: true, 
+      message: 'User passwords reset successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ Reset passwords error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
 // Start server
 const startServer = async () => {
   try {
