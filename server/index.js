@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const { Pool } = require('pg');
+const bcrypt = require('bcrypt');
 require('dotenv').config();
 
 // Environment safety check
@@ -1694,6 +1695,49 @@ app.post('/api/update-password', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Password update error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
+// Temporary endpoint to create test user
+app.post('/api/create-test-user', async (req, res) => {
+  try {
+    const { userId, username, email, password, role } = req.body;
+    
+    if (!userId || !username || !email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All fields are required' 
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert user
+    await pool.query(`
+      INSERT INTO users (id, username, email, password, role, createdAt, updatedAt)
+      VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        username = EXCLUDED.username,
+        email = EXCLUDED.email,
+        password = EXCLUDED.password,
+        role = EXCLUDED.role,
+        updatedAt = NOW()
+    `, [userId, username, email, hashedPassword, role || 'admin']);
+
+    console.log(`✅ Test user created: ${username} (${userId})`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Test user created successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ Create test user error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Server error' 
