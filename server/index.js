@@ -1792,6 +1792,34 @@ app.post('/api/reset-user-passwords', async (req, res) => {
   }
 });
 
+// Simple password fix endpoint
+app.post('/api/fix-baseel-password', async (req, res) => {
+  try {
+    const userId = 'usr_nazir_001';
+    const correctPassword = 'baseel123';
+    const hashedPassword = '$2b$10$d.O.juucl6lKUJtnsvQV4ep3ivEkpdASjEhjjFSwtp0ZqzakPyNB2';
+    
+    await pool.query(
+      'UPDATE users SET password = $1 WHERE id = $2',
+      [hashedPassword, userId]
+    );
+    
+    console.log('✅ Baseel password fixed to baseel123');
+    
+    res.json({ 
+      success: true, 
+      message: 'Password fixed to baseel123' 
+    });
+
+  } catch (error) {
+    console.error('❌ Fix password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
 // Start server
 const startServer = async () => {
   try {
