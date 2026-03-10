@@ -1820,6 +1820,54 @@ app.post('/api/fix-baseel-password', async (req, res) => {
   }
 });
 
+// Sync local storage password endpoint
+app.post('/api/sync-local-password', async (req, res) => {
+  try {
+    const { userId, currentPassword } = req.body;
+    
+    // Get user from database
+    const userQuery = await pool.query(
+      'SELECT * FROM users WHERE id = $1',
+      [userId]
+    );
+    
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+    
+    const user = userQuery.rows[0];
+    
+    // Check if current password matches database
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    
+    if (isMatch) {
+      // Password matches - return success
+      res.json({ 
+        success: true, 
+        message: 'Password sync confirmed',
+        correctPassword: currentPassword
+      });
+    } else {
+      // Password doesn't match - return the actual password hash for debugging
+      res.json({ 
+        success: false, 
+        message: 'Password mismatch detected',
+        debug: 'Local storage password does not match server password'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Sync password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
 // Start server
 const startServer = async () => {
   try {
