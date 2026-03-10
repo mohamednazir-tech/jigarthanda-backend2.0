@@ -226,6 +226,66 @@ const userRoles = {
   "usr_nazir_001": "staff"
 };
 
+// Login API - PostgreSQL authentication
+app.post('/api/login', async (req, res) => {
+  try {
+    console.log('🔐 Login request received:', { username: req.body.username });
+    
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.json({
+        success: false,
+        message: 'Username and password required',
+      });
+    }
+
+    // Query user from PostgreSQL
+    const userResult = await pool.query(
+      'SELECT * FROM users WHERE username = $1',
+      [username]
+    );
+
+    if (userResult.rows.length === 0) {
+      console.log('❌ User not found:', username);
+      return res.json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Verify password with bcrypt
+    const validPassword = await bcrypt.compare(password, user.password);
+
+    if (!validPassword) {
+      console.log('❌ Invalid password for user:', username);
+      return res.json({
+        success: false,
+        message: 'Invalid password',
+      });
+    }
+
+    console.log('✅ Login successful:', { username: user.username, id: user.id });
+
+    // Return user data (without password)
+    const { password: _, ...userWithoutPassword } = user;
+    
+    res.json({
+      success: true,
+      user: userWithoutPassword,
+    });
+
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during login',
+    });
+  }
+});
+
 // Create Order with Push Notification - v2.3 (Fixed query params - 2026-03-04-19:40)
 app.post('/api/orders', async (req, res) => {
   try {
