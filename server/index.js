@@ -3,8 +3,6 @@ const cors = require('cors');
 const axios = require('axios');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const { createServer } = require('http');
-const { Server } = require('socket.io');
 require('dotenv').config();
 
 // Environment safety check
@@ -226,66 +224,6 @@ const userRoles = {
   "usr_nazir_001": "staff"
 };
 
-// Login API - PostgreSQL authentication
-app.post('/api/login', async (req, res) => {
-  try {
-    console.log('🔐 Login request received:', { username: req.body.username });
-    
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-      return res.json({
-        success: false,
-        message: 'Username and password required',
-      });
-    }
-
-    // Query user from PostgreSQL
-    const userResult = await pool.query(
-      'SELECT * FROM users WHERE username = $1',
-      [username]
-    );
-
-    if (userResult.rows.length === 0) {
-      console.log('❌ User not found:', username);
-      return res.json({
-        success: false,
-        message: 'User not found',
-      });
-    }
-
-    const user = userResult.rows[0];
-
-    // Verify password with bcrypt
-    const validPassword = await bcrypt.compare(password, user.password);
-
-    if (!validPassword) {
-      console.log('❌ Invalid password for user:', username);
-      return res.json({
-        success: false,
-        message: 'Invalid password',
-      });
-    }
-
-    console.log('✅ Login successful:', { username: user.username, id: user.id });
-
-    // Return user data (without password)
-    const { password: _, ...userWithoutPassword } = user;
-    
-    res.json({
-      success: true,
-      user: userWithoutPassword,
-    });
-
-  } catch (error) {
-    console.error('❌ Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during login',
-    });
-  }
-});
-
 // Create Order with Push Notification - v2.3 (Fixed query params - 2026-03-04-19:40)
 app.post('/api/orders', async (req, res) => {
   try {
@@ -385,18 +323,6 @@ app.post('/test-add-baseel-device', async (req, res) => {
     }
     
     await sendPushNotificationToBaseel(order);
-
-    // 🔥 Send real-time WebSocket update
-    if (global.io) {
-      global.io.to('baseel-orders').emit('new-order', {
-        id: order.id,
-        items: order.items,
-        total: order.total,
-        customer: order.customer_name || 'Walk-in',
-        timestamp: new Date().toISOString()
-      });
-      console.log('📡 Real-time order emitted to Baseel devices');
-    }
 
     // Send confirmation to user who created order
     console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
@@ -1894,97 +1820,13 @@ app.post('/api/fix-baseel-password', async (req, res) => {
   }
 });
 
-// Sync local storage password endpoint
-app.post('/api/sync-local-password', async (req, res) => {
-  try {
-    const { userId, currentPassword } = req.body;
-    
-    // Get user from database
-    const userQuery = await pool.query(
-      'SELECT * FROM users WHERE id = $1',
-      [userId]
-    );
-    
-    if (userQuery.rows.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'User not found' 
-      });
-    }
-    
-    const user = userQuery.rows[0];
-    
-    // Check if current password matches database
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
-    
-    if (isMatch) {
-      // Password matches - return success
-      res.json({ 
-        success: true, 
-        message: 'Password sync confirmed',
-        correctPassword: currentPassword
-      });
-    } else {
-      // Password doesn't match - return the actual password hash for debugging
-      res.json({ 
-        success: false, 
-        message: 'Password mismatch detected',
-        debug: 'Local storage password does not match server password'
-      });
-    }
-    
-  } catch (error) {
-    console.error('❌ Sync password error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error' 
-    });
-  }
-});
-
 // Start server
 const startServer = async () => {
   try {
     await createTables();
     
-    // Create HTTP server with WebSocket support
-    const server = createServer(app);
-    const io = new Server(server, {
-      cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-      }
-    });
-
-    // WebSocket connection handling
-    io.on('connection', (socket) => {
-      console.log('🔌 WebSocket client connected:', socket.id);
-      
-      // Join user to their personal room
-      const userId = socket.handshake.auth.userId;
-      if (userId) {
-        socket.join(`user-${userId}`);
-        console.log(`👤 User ${userId} joined their room`);
-      }
-
-      // Handle real-time events
-      socket.on('join-orders', () => {
-        if (userId === 'usr_nazir_001') {
-          socket.join('baseel-orders');
-          console.log('📱 Baseel joined orders room');
-        }
-      });
-
-      socket.on('disconnect', () => {
-        console.log('🔌 WebSocket client disconnected:', socket.id);
-      });
-    });
-
-    // Make io globally available for order emission
-    global.io = io;
-
-    // Start HTTP server with WebSocket support
-    server.listen(PORT, async () => {
+    // Start HTTP server
+    app.listen(PORT, async () => {
       console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
       console.log(`📊 Local: http://localhost:${PORT}`);
       console.log(`🌐 Network: http://10.171.132.69:${PORT}`);
