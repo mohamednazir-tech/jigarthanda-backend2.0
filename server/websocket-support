@@ -1,0 +1,59 @@
+const { createServer } = require('http');
+const { Server } = require('socket.io');
+const express = require('express');
+
+// Add WebSocket support to existing server
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log('🔌 WebSocket client connected:', socket.id);
+  
+  // Join user to their personal room
+  const userId = socket.handshake.auth.userId;
+  if (userId) {
+    socket.join(`user-${userId}`);
+    console.log(`👤 User ${userId} joined their room`);
+  }
+
+  // Handle real-time events
+  socket.on('join-orders', () => {
+    if (userId === 'usr_nazir_001') {
+      socket.join('baseel-orders');
+      console.log('📱 Baseel joined orders room');
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('🔌 WebSocket client disconnected:', socket.id);
+  });
+});
+
+// Helper function to emit real-time order updates
+function emitNewOrder(order) {
+  io.to('baseel-orders').emit('new-order', {
+    id: order.id,
+    items: order.items,
+    total: order.total,
+    customer: order.customer_name || 'Walk-in',
+    timestamp: new Date().toISOString()
+  });
+  
+  console.log('📡 Real-time order emitted to Baseel devices');
+}
+
+// Update the order creation to emit real-time updates
+// In the existing POST /api/orders endpoint, add:
+// emitNewOrder(order);
+
+// Replace app.listen with httpServer.listen
+const PORT = process.env.PORT || 3000;
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Server with WebSocket support running on port ${PORT}`);
+});
