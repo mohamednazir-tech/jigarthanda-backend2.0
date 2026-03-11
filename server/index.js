@@ -1165,8 +1165,21 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     
     orders.forEach(order => {
       const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-      const hour = new Date(order.createdAt).getHours();
-      const orderDate = new Date(order.createdAt).toISOString().split('T')[0];
+      
+      // Validate createdAt before processing
+      if (!order.createdAt) {
+        console.log('⚠️ Skipping order with null createdAt:', order.id);
+        return;
+      }
+      
+      const orderDateObj = new Date(order.createdAt);
+      if (isNaN(orderDateObj.getTime())) {
+        console.log('⚠️ Skipping order with invalid createdAt:', order.id, order.createdAt);
+        return;
+      }
+      
+      const hour = orderDateObj.getHours();
+      const orderDate = orderDateObj.toISOString().split('T')[0];
       
       // Initialize date revenue tracking
       if (!revenueByDate[orderDate]) {
