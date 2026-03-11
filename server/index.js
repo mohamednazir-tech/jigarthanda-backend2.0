@@ -1227,6 +1227,71 @@ app.delete('/api/orders/all', async (req, res) => {
   }
 });
 
+// Proper Login API Endpoint
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    console.log('🔐 Login attempt:', { username, password: '***' });
+    
+    if (!username || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Username and password are required' 
+      });
+    }
+
+    // Find user in PostgreSQL database
+    const userQuery = await pool.query(
+      'SELECT id, username, password, name, district, role, phone FROM users WHERE username = $1',
+      [username]
+    );
+
+    if (userQuery.rows.length === 0) {
+      console.log('❌ User not found:', username);
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid username or password' 
+      });
+    }
+
+    const user = userQuery.rows[0];
+    
+    // Verify password using bcrypt
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    
+    if (!isPasswordValid) {
+      console.log('❌ Invalid password for user:', username);
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid username or password' 
+      });
+    }
+
+    console.log('✅ Login successful for user:', username);
+    
+    // Return user data without password
+    res.json({ 
+      success: true, 
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        district: user.district,
+        role: user.role,
+        phone: user.phone
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error during login' 
+    });
+  }
+});
+
 // Combined login-device API (register + activate in one call)
 app.post('/api/login-device', async (req, res) => {
   try {
@@ -1632,10 +1697,102 @@ app.post('/api/update-username', async (req, res) => {
   }
 });
 
+// Temporary Password Reset Endpoint (for debugging purposes)
+app.post('/api/reset-password-temp', async (req, res) => {
+  try {
+    const { userId, newPassword } = req.body;
+    
+    if (!userId || !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User ID and new password are required' 
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'New password must be at least 6 characters' 
+      });
+    }
+
+    // Check if user exists
+    const userResult = await pool.query(
+      'SELECT id FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Hash new password
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password without requiring current password
+    await pool.query(
+      'UPDATE users SET password = $1 WHERE id = $2',
+      [hashedNewPassword, userId]
+    );
+
+    console.log(`✅ Password reset for user: ${userId}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Password reset successfully!' 
+    });
+
+  } catch (error) {
+    console.error('❌ Password reset error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
+// Quick Password Fix Endpoint - Fix baseel password
+app.post('/api/fix-baseel-password', async (req, res) => {
+  try {
+    const userId = 'usr_nazir_001';
+    const correctPassword = 'baseel123';
+    
+    console.log('🔧 Fixing password for user:', userId);
+    
+    // Hash the correct password
+    const hashedPassword = await bcrypt.hash(correctPassword, 10);
+    
+    // Update password in database
+    await pool.query(
+      'UPDATE users SET password = $1 WHERE id = $2',
+      [hashedPassword, userId]
+    );
+    
+    console.log('✅ Password fixed successfully for:', userId);
+    
+    res.json({ 
+      success: true, 
+      message: 'Password fixed to baseel123' 
+    });
+    
+  } catch (error) {
+    console.error('❌ Password fix error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
 // Update Password Endpoint
 app.post('/api/update-password', async (req, res) => {
   try {
     const { userId, currentPassword, newPassword } = req.body;
+    
+    console.log('🔍 Password update request:', { userId, currentPassword, newPassword });
     
     if (!userId || !currentPassword || !newPassword) {
       return res.status(400).json({ 
