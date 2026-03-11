@@ -2058,23 +2058,109 @@ app.post('/api/reset-user-passwords', async (req, res) => {
   }
 });
 
-// Simple password fix endpoint
+// Fix Admin Password Endpoint
+app.post('/api/fix-admin-password', async (req, res) => {
+  try {
+    const { username, newPassword } = req.body;
+    
+    if (!username || !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Username and new password are required' 
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    
+    // Update user password in database
+    await pool.query(
+      'UPDATE users SET password = $1 WHERE username = $2',
+      [hashedPassword, username]
+    );
+
+    console.log(`✅ Admin password fixed for: ${username}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Admin password fixed successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ Fix admin password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
+// Create Admin User With Email Endpoint
+app.post('/api/create-admin-with-email', async (req, res) => {
+  try {
+    const { id, username, email, password, role } = req.body;
+    
+    if (!id || !username || !password || !role) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All fields are required except email' 
+      });
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Create user with default email if not provided
+    const userEmail = email || 'admin@example.com';
+    
+    // Create or update user in database
+    await pool.query(
+      'INSERT INTO users (id, username, email, password, role) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, email = EXCLUDED.email, password = EXCLUDED.password, role = EXCLUDED.role',
+      [id, username, userEmail, hashedPassword, role]
+    );
+
+    console.log(`✅ Admin user created with email: ${username} (${id})`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Admin user created successfully with email' 
+    });
+
+  } catch (error) {
+    console.error('❌ Create admin user with email error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
+// Simple password fix endpoint + create admin user
 app.post('/api/fix-baseel-password', async (req, res) => {
   try {
     const userId = 'usr_nazir_001';
     const correctPassword = 'baseel123';
     const hashedPassword = '$2b$10$d.O.juucl6lKUJtnsvQV4ep3ivEkpdASjEhjjFSwtp0ZqzakPyNB2';
     
+    // Fix baseel password
     await pool.query(
       'UPDATE users SET password = $1 WHERE id = $2',
       [hashedPassword, userId]
     );
     
+    // Create admin user if it doesn't exist
+    const adminHashedPassword = await bcrypt.hash('admin123', 10);
+    await pool.query(
+      'INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET password = EXCLUDED.password',
+      ['usr_admin_001', 'admin', adminHashedPassword, 'staff']
+    );
+    
     console.log('✅ Baseel password fixed to baseel123');
+    console.log('✅ Admin user created/updated: admin/admin123');
     
     res.json({ 
       success: true, 
-      message: 'Password fixed to baseel123' 
+      message: 'Password fixed to baseel123 and admin user created' 
     });
 
   } catch (error) {
