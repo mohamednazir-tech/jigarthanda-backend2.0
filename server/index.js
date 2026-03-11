@@ -1292,9 +1292,9 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       timestamp: new Date().toISOString(),
       date: `Last 3 Days (${new Date().toISOString().split('T')[0]})`,
       summary: {
-        totalOrders: aggregates.totalorders || orders.length,
-        totalRevenue: Math.round((aggregates.totalrevenue || totalRevenue) * 100) / 100,
-        avgOrderValue: Math.round((aggregates.avgordervalue || (validOrderCount > 0 ? totalRevenue / validOrderCount : 0)) * 100) / 100,
+        totalOrders: aggregates.totalOrders || orders.length,
+        totalRevenue: Math.round((aggregates.totalRevenue || totalRevenue) * 100) / 100,
+        avgOrderValue: Math.round((aggregates.avgOrderValue || (validOrderCount > 0 ? totalRevenue / validOrderCount : 0)) * 100) / 100,
         uniqueItems: itemsArray.length,
         peakTime: Object.keys(timeStats).reduce((a, b) => 
           timeStats[a] > timeStats[b] ? a : b
@@ -1315,9 +1315,9 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       insights: {
         topPerformer: allItemsRanked[0]?.name || 'No data',
         worstPerformer: allItemsRanked[allItemsRanked.length - 1]?.name || 'No data',
-        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / (aggregates.totalrevenue || totalRevenue) * 100),
-        recommendation: (aggregates.totalrevenue || totalRevenue) > 1000 ? '🎉 Excellent Sales Day!' : 
-                      (aggregates.totalrevenue || totalRevenue) > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
+        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / (aggregates.totalRevenue || totalRevenue) * 100),
+        recommendation: (aggregates.totalRevenue || totalRevenue) > 1000 ? '🎉 Excellent Sales Day!' : 
+                      (aggregates.totalRevenue || totalRevenue) > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
       }
     };
     
