@@ -1695,6 +1695,80 @@ app.post('/api/update-username', async (req, res) => {
   }
 });
 
+// Update User ID Endpoint
+app.post('/api/update-user-id', async (req, res) => {
+  try {
+    const { oldUserId, newUserId } = req.body;
+    
+    if (!oldUserId || !newUserId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Old user ID and new user ID are required' 
+      });
+    }
+
+    // Update user ID in all relevant tables
+    await pool.query(
+      'UPDATE users SET id = $1 WHERE id = $2',
+      [newUserId, oldUserId]
+    );
+
+    // Update orders to use new user ID
+    await pool.query(
+      'UPDATE orders SET userId = $1 WHERE userId = $2',
+      [newUserId, oldUserId]
+    );
+
+    console.log(`✅ User ID updated: ${oldUserId} -> ${newUserId}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'User ID updated successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ User ID update error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
+// Update User Role Endpoint
+app.post('/api/update-user-role', async (req, res) => {
+  try {
+    const { userId, newRole } = req.body;
+    
+    if (!userId || !newRole) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User ID and new role are required' 
+      });
+    }
+
+    // Update user role in database
+    await pool.query(
+      'UPDATE users SET role = $1 WHERE id = $2',
+      [newRole, userId]
+    );
+
+    console.log(`✅ Role updated for user: ${userId} -> ${newRole}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'User role updated successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ Role update error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
 // Temporary Password Reset Endpoint (for debugging purposes)
 app.post('/api/reset-password-temp', async (req, res) => {
   try {
