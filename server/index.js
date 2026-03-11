@@ -1695,6 +1695,43 @@ app.post('/api/update-username', async (req, res) => {
   }
 });
 
+// Create Admin User Endpoint
+app.post('/api/create-admin-user', async (req, res) => {
+  try {
+    const { id, username, password, role } = req.body;
+    
+    if (!id || !username || !password || !role) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All fields are required' 
+      });
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Create the user in database
+    await pool.query(
+      'INSERT INTO users (id, username, password, role) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, password = EXCLUDED.password, role = EXCLUDED.role',
+      [id, username, hashedPassword, role]
+    );
+
+    console.log(`✅ Admin user created: ${username} (${id})`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Admin user created successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ Create admin user error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
 // Update User ID Endpoint
 app.post('/api/update-user-id', async (req, res) => {
   try {
