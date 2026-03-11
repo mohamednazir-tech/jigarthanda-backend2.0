@@ -1029,7 +1029,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     
     console.log('📊 Generating Baseel sales report for user:', userId);
     
-    // Get last 3 days sales data with item frequencies
+    // Get last 3 days sales data with item frequencies AND aggregate calculations
     const salesDataQuery = `
       SELECT 
         o.items,
@@ -1039,14 +1039,44 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         o.id,
         o.grandTotal
       FROM orders o
-      WHERE o.createdAt >= NOW() - INTERVAL '3 days'
+      WHERE o.createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '3 days'
       ORDER BY o.createdAt DESC
     `;
     
-    const salesResult = await pool.query(salesDataQuery);
+    // Also get aggregate data for faster average calculation
+    const aggregateQuery = `
+      SELECT 
+        COUNT(*) as totalOrders,
+        SUM(COALESCE(grandTotal,total)) as totalRevenue,
+        AVG(COALESCE(grandTotal,total)) as avgOrderValue
+      FROM orders o
+      WHERE o.createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '3 days'
+    `;
+    
+    // Daily revenue trend for enhanced reporting
+    const dailyTrendQuery = `
+      SELECT 
+        DATE(o.createdAt AT TIME ZONE 'Asia/Kolkata') as day,
+        SUM(COALESCE(o.grandTotal, o.total)) as revenue,
+        COUNT(*) as orders
+      FROM orders o
+      WHERE o.createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '3 days'
+      GROUP BY DATE(o.createdAt AT TIME ZONE 'Asia/Kolkata')
+      ORDER BY day DESC
+    `;
+    
+    const [salesResult, aggregateResult, trendResult] = await Promise.all([
+      pool.query(salesDataQuery),
+      pool.query(aggregateQuery),
+      pool.query(dailyTrendQuery)
+    ]);
+    
     const orders = salesResult.rows;
+    const aggregates = aggregateResult.rows[0];
+    const dailyTrend = trendResult.rows;
     
     console.log('📊 Found orders for last 3 days:', orders.length);
+    console.log('📈 Daily trend data:', dailyTrend);
     
     // Parse items and calculate frequencies
     const itemStats = {};
@@ -1057,8 +1087,8 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     
     orders.forEach(order => {
       const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-      const hour = new Date(order.createdat).getHours();
-      const orderDate = new Date(order.createdat).toISOString().split('T')[0];
+      const hour = new Date(order.createdAt).getHours();
+      const orderDate = new Date(order.createdAt).toISOString().split('T')[0];
       
       // Initialize date revenue tracking
       if (!revenueByDate[orderDate]) {
@@ -1121,31 +1151,49 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         performance: item.revenue > totalRevenue / itemsArray.length ? '🔥 Top Performer' : '📊 Good Seller'
       }));
     
+    // Calculate time percentages with guaranteed 100% total
+    const morningCount = timeStats.morning;
+    const afternoonCount = timeStats.afternoon;
+    const eveningCount = timeStats.evening;
+    const nightCount = timeStats.night;
+    const totalOrdersForPercentage = aggregates.totalorders || orders.length;
+    
+    // Calculate first 3 percentages, then compute 4th automatically
+    const morningPercentage = Math.floor((morningCount / totalOrdersForPercentage) * 100);
+    const afternoonPercentage = Math.floor((afternoonCount / totalOrdersForPercentage) * 100);
+    const eveningPercentage = Math.floor((eveningCount / totalOrdersForPercentage) * 100);
+    const nightPercentage = 100 - (morningPercentage + afternoonPercentage + eveningPercentage);
+    
     const report = {
       timestamp: new Date().toISOString(),
       date: `Last 3 Days (${new Date().toISOString().split('T')[0]})`,
       summary: {
-        totalOrders: orders.length,
-        totalRevenue: Math.round(totalRevenue * 100) / 100,
-        avgOrderValue: validOrderCount > 0 ? Math.round((totalRevenue / validOrderCount) * 100) / 100 : 0,
+        totalOrders: aggregates.totalorders || orders.length,
+        totalRevenue: Math.round((aggregates.totalrevenue || totalRevenue) * 100) / 100,
+        avgOrderValue: Math.round((aggregates.avgordervalue || (validOrderCount > 0 ? totalRevenue / validOrderCount : 0)) * 100) / 100,
         uniqueItems: itemsArray.length,
         peakTime: Object.keys(timeStats).reduce((a, b) => 
           timeStats[a] > timeStats[b] ? a : b
         )
       },
       timeAnalysis: {
-        morning: { count: timeStats.morning, percentage: Math.round((timeStats.morning / orders.length) * 100) },
-        afternoon: { count: timeStats.afternoon, percentage: Math.round((timeStats.afternoon / orders.length) * 100) },
-        evening: { count: timeStats.evening, percentage: Math.round((timeStats.evening / orders.length) * 100) },
-        night: { count: timeStats.night, percentage: Math.round((timeStats.night / orders.length) * 100) }
+        morning: { count: morningCount, percentage: morningPercentage },
+        afternoon: { count: afternoonCount, percentage: afternoonPercentage },
+        evening: { count: eveningCount, percentage: eveningPercentage },
+        night: { count: nightCount, percentage: nightPercentage }
       },
       allItemsRanked: allItemsRanked,
+      dailyTrend: dailyTrend.map(day => ({
+        date: day.day,
+        revenue: Math.round(Number(day.revenue) * 100) / 100,
+        orders: Number(day.orders)
+      })),
       insights: {
         topPerformer: allItemsRanked[0]?.name || 'No data',
         worstPerformer: allItemsRanked[allItemsRanked.length - 1]?.name || 'No data',
-        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / totalRevenue * 100),
-        recommendation: totalRevenue > 1000 ? '🎉 Excellent Sales Day!' : 
-                      totalRevenue > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
+        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / (aggregates.totalrevenue || totalRevenue) * 100),
+        recommendation: (aggregates.totalrevenue || totalRevenue) > 1000 ? '🎉 Excellent Sales Day!' : 
+                      (aggregates.totalrevenue || totalRevenue) > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
       }
     };
     
@@ -1243,7 +1291,7 @@ app.post('/api/login', async (req, res) => {
 
     // Find user in PostgreSQL database
     const userQuery = await pool.query(
-      'SELECT id, username, name, district, district_tamil, role, createdAt FROM users WHERE username = $1',
+      'SELECT id, username, password, name, district, district_tamil, role, createdAt FROM users WHERE username = $1',
       [username]
     );
 
@@ -1256,6 +1304,13 @@ app.post('/api/login', async (req, res) => {
     }
 
     const user = userQuery.rows[0];
+    
+    console.log("🔍 User from DB:", { 
+      id: user.id, 
+      username: user.username, 
+      hasPassword: !!user.password,
+      passwordHash: user.password ? user.password.substring(0, 20) + "..." : "undefined"
+    });
     
     // Verify password using bcrypt
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -1280,7 +1335,7 @@ app.post('/api/login', async (req, res) => {
         district: user.district,
         districtTamil: user.district_tamil,
         role: user.role || 'user',
-        createdAt: user.createdat
+        createdAt: user.createdAt
       }
     });
     
@@ -1399,7 +1454,7 @@ app.get('/api/all-device-tokens', async (req, res) => {
       token: row.token ? row.token.slice(-15) + '...' : 'NULL',
       platform: row.platform,
       isActive: row.isactive,
-      registeredAt: row.createdat
+      registeredAt: row.createdAt
     }));
     
     // Check for duplicate tokens
@@ -1485,13 +1540,13 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
           token: row.token ? row.token.slice(-10) + '...' : 'NULL',
           platform: row.platform,
           isActive: row.isactive,
-          registeredAt: row.createdat
+          registeredAt: row.createdAt
         })),
         activeDevices: activeDevicesResult.rows.map(row => ({
           token: row.token ? row.token.slice(-10) + '...' : 'NULL',
           platform: row.platform,
           isActive: row.isactive,
-          registeredAt: row.createdat
+          registeredAt: row.createdAt
         })),
         hasActiveDevice: activeDevicesResult.rows.length > 0
       },
@@ -1501,12 +1556,12 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
         baseelOrders: baseelOrdersResult.rows.map(row => ({
           id: row.id.slice(-6),
           createdBy: row.createdbyname,
-          createdAt: row.createdat
+          createdAt: row.createdAt
         })),
         staffOrders: staffOrdersResult.rows.map(row => ({
           id: row.id.slice(-6),
           createdBy: row.createdbyname,
-          createdAt: row.createdat
+          createdAt: row.createdAt
         }))
       },
       notificationLogic: {
@@ -1947,6 +2002,12 @@ app.post('/api/update-password', async (req, res) => {
 
     // Hash new password
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    
+    console.log("🔐 Password update debug:", {
+      userId,
+      newPasswordLength: newPassword.length,
+      hashedPassword: hashedNewPassword.substring(0, 20) + "..."
+    });
 
     // Update password
     await pool.query(
