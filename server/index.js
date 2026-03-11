@@ -1243,7 +1243,7 @@ app.post('/api/login', async (req, res) => {
 
     // Find user in PostgreSQL database
     const userQuery = await pool.query(
-      'SELECT id, username, password, role, createdAt FROM users WHERE username = $1',
+      'SELECT id, username, name, district, district_tamil, role, createdAt FROM users WHERE username = $1',
       [username]
     );
 
@@ -1276,6 +1276,9 @@ app.post('/api/login', async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
+        name: user.name,
+        district: user.district,
+        districtTamil: user.district_tamil,
         role: user.role || 'user',
         createdAt: user.createdat
       }
@@ -2051,6 +2054,40 @@ app.post('/api/reset-user-passwords', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Reset passwords error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
+  }
+});
+
+// Update Account Settings Endpoint
+app.post('/api/update-account-settings', async (req, res) => {
+  try {
+    const { userId, name, district, districtTamil } = req.body;
+    
+    if (!userId || !name || !district || !districtTamil) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All fields are required' 
+      });
+    }
+
+    // Update user account settings in database
+    await pool.query(
+      'UPDATE users SET name = $1, district = $2, district_tamil = $3 WHERE id = $4',
+      [name, district, districtTamil, userId]
+    );
+
+    console.log(`✅ Account settings updated for user: ${userId}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Account settings updated successfully' 
+    });
+
+  } catch (error) {
+    console.error('❌ Account settings update error:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Server error' 
