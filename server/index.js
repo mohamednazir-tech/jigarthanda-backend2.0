@@ -1243,7 +1243,7 @@ app.post('/api/login', async (req, res) => {
 
     // Find user in PostgreSQL database
     const userQuery = await pool.query(
-      'SELECT id, username, password, name, district, role, phone FROM users WHERE username = $1',
+      'SELECT id, username, password, role, createdAt FROM users WHERE username = $1',
       [username]
     );
 
@@ -1276,10 +1276,8 @@ app.post('/api/login', async (req, res) => {
       user: {
         id: user.id,
         username: user.username,
-        name: user.name,
-        district: user.district,
-        role: user.role,
-        phone: user.phone
+        role: user.role || 'user',
+        createdAt: user.createdat
       }
     });
     
