@@ -1164,18 +1164,39 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     const revenueByDate = {};
     
     orders.forEach(order => {
-      const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+      console.log(`🔍 Processing order ${order.id}, items type:`, typeof order.items);
+      console.log(`🔍 Items data:`, order.items);
       
-      // Validate createdAt before processing
-      if (!order.createdAt) {
-        console.log('⚠️ Skipping order with null createdAt:', order.id);
+      let items;
+      try {
+        items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+        console.log(`🔍 Parsed items:`, items);
+      } catch (error) {
+        console.log(`❌ Failed to parse items for order ${order.id}:`, error);
+        return; // Skip this order
+      }
+      
+      // Validate items array
+      if (!Array.isArray(items)) {
+        console.log(`⚠️ Items is not an array for order ${order.id}:`, items);
         return;
       }
       
-      const orderDateObj = new Date(order.createdAt);
-      if (isNaN(orderDateObj.getTime())) {
-        console.log('⚠️ Skipping order with invalid createdAt:', order.id, order.createdAt);
-        return;
+      // Use order ID timestamp as fallback for createdAt
+      let orderDateObj;
+      if (order.createdAt) {
+        orderDateObj = new Date(order.createdAt);
+        if (isNaN(orderDateObj.getTime())) {
+          // Extract timestamp from order ID as fallback
+          const timestamp = parseInt(order.id.replace(/\D/g, ''));
+          orderDateObj = new Date(timestamp);
+          console.log(`⚠️ Using order ID timestamp for ${order.id}:`, orderDateObj);
+        }
+      } else {
+        // Extract timestamp from order ID as fallback
+        const timestamp = parseInt(order.id.replace(/\D/g, ''));
+        orderDateObj = new Date(timestamp);
+        console.log(`⚠️ No createdAt, using order ID timestamp for ${order.id}:`, orderDateObj);
       }
       
       const hour = orderDateObj.getHours();
@@ -1207,21 +1228,33 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       }
       
       // Count item frequencies
-      items.forEach(item => {
-        const itemName = item.item.name;
-        const itemPrice = parseFloat(item.item.price) || 0;
-        
-        if (!itemStats[itemName]) {
-          itemStats[itemName] = {
-            name: itemName,
-            count: 0,
-            revenue: 0,
-            avgPrice: 0
-          };
-        }
-        itemStats[itemName].count += item.quantity;
-        itemStats[itemName].revenue += (itemPrice * item.quantity);
-      });
+      if (items.length > 0) {
+        items.forEach(item => {
+          // Validate item structure
+          if (!item || !item.item || !item.item.name) {
+            console.log(`⚠️ Invalid item structure in order ${order.id}:`, item);
+            return; // Skip this item
+          }
+          
+          const itemName = item.item.name;
+          const itemPrice = parseFloat(item.item.price) || 0;
+          
+          console.log(`🔍 Processing item: ${itemName}, quantity: ${item.quantity}, price: ${itemPrice}`);
+          
+          if (!itemStats[itemName]) {
+            itemStats[itemName] = {
+              name: itemName,
+              count: 0,
+              revenue: 0,
+              avgPrice: 0
+            };
+          }
+          itemStats[itemName].count += item.quantity;
+          itemStats[itemName].revenue += (itemPrice * item.quantity);
+        });
+      } else {
+        console.log(`⚠️ No items found in order ${order.id}`);
+      }
     });
     
     // Calculate average prices and sort
