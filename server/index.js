@@ -221,7 +221,7 @@ app.post('/api/orders/sync', async (req, res) => {
 // Cached user roles for performance and security
 const userRoles = {
   "usr_admin_001": "admin",
-  "usr_nazir_001": "staff"
+  "usr_baseel_001": "staff"
 };
 
 // Create Order with Push Notification - v2.3 (Fixed query params - 2026-03-04-19:40)
@@ -253,7 +253,7 @@ app.post('/api/orders', async (req, res) => {
     let createdByName = 'Unknown';
     if (userId === 'usr_admin_001') {
       createdByName = 'Admin';
-    } else if (userId === 'usr_nazir_001') {
+    } else if (userId === 'usr_baseel_001') {
       createdByName = 'Baseel';
     }
 
@@ -301,7 +301,7 @@ app.post('/test-add-baseel-device', async (req, res) => {
     
     await pool.query(
       'INSERT INTO user_devices (userid, token, platform, isactive) VALUES ($1, $2, $3, true) ON CONFLICT (token) DO UPDATE SET isactive = true',
-      ['usr_nazir_001', testToken, 'android']
+      ['usr_baseel_001', testToken, 'android']
     );
     
     console.log('✅ Test Baseel device added:', testToken);
@@ -315,14 +315,92 @@ app.post('/test-add-baseel-device', async (req, res) => {
 // Send push notification to Baseel for ALL new orders (both admin and staff)
     console.log('🔔 New order created - sending notification to Baseel');
     console.log('📱 Order created by:', userId, '(', userRole, ')');
-    console.log('🎯 Sending NEW ORDER notification to Baseel (usr_nazir_001)');
+    console.log('🎯 Sending NEW ORDER notification to Baseel (usr_baseel_001)');
     
     // Debug: Check if order creator is Baseel
-    if (userId === 'usr_nazir_001') {
+    if (userId === 'usr_baseel_001') {
       console.log('🔍 Order created by Baseel - should still receive notification on other devices');
     }
     
-    await sendPushNotificationToBaseel(order);
+    // Get Baseel's ACTIVE device tokens only
+    const devicesResponse = await pool.query(
+      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
+      ['usr_baseel_001'] // Baseel user ID
+    );
+
+    const tokens = devicesResponse.rows.map(row => row.token);
+    
+    console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
+    console.log('📱 Device tokens:', tokens.map(t => t.slice(-10)));
+
+    if (tokens.length === 0) {
+      console.log('❌ No active devices found for Baseel - notifications disabled');
+      return;
+    }
+
+    console.log('📱 Found', tokens.length, 'active Baseel devices - sending notifications to all');
+
+    // Send push notifications to ALL active devices in PARALLEL for better performance
+    // Prepare notification data once
+    const items = typeof order.items === "string"
+      ? JSON.parse(order.items)
+      : order.items;
+    const itemNames = items.map(item => item.item.name).slice(0, 3);
+    const itemsText = itemNames.length > 2 
+      ? `${itemNames.join(', ')} + ${items.length - 2} more`
+      : itemNames.join(', ');
+
+    // Professional notification formatting
+    const orderTime = new Date().toLocaleTimeString('en-IN', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+
+    const notificationPromises = tokens.map(async (token) => {
+      try {
+        // Skip invalid tokens to prevent push errors
+        if (!token.startsWith('ExponentPushToken')) {
+          console.log(`⚠️ Skipping invalid token: ${token.slice(-10)}`);
+          return { success: false, token: token.slice(-10), error: 'Invalid token format' };
+        }
+        
+        await axios.post(
+          'https://exp.host/--/api/v2/push/send',
+          {
+            to: token,
+            sound: 'default',
+            title: '🧾 New Order - Hanifa Jigarthanda',
+            body: `${itemsText} • ₹${order.grandTotal} • ${orderTime}`,
+            data: { 
+              orderId: order.id,
+              type: 'new_order',
+              userId: order.userId,
+              total: order.grandTotal,
+              items: itemsText,
+              time: orderTime
+            },
+            priority: 'high',
+          },
+          { timeout: 5000 }
+        );
+        console.log(`✅ Push notification sent to active device: ${token.slice(-10)}`);
+        return { success: true, token: token.slice(-10) };
+      } catch (error) {
+        console.error(`❌ Push failed for active device ${token.slice(-10)}:`, error.message);
+        return { success: false, token: token.slice(-10), error: error.message };
+      }
+    });
+
+    // Wait for ALL notifications to complete in parallel
+    const results = await Promise.allSettled(notificationPromises);
+    
+    // Log results summary
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
+    
+    console.log(`📊 Active device notification results: ${successful} successful, ${failed} failed`);
+
+    console.log('✅ Push notification sent to active Baseel devices:', tokens.length);
 
     // Send confirmation to user who created order
     console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
@@ -352,7 +430,7 @@ async function sendPushNotificationToBaseel(order) {
     // Get Baseel's ACTIVE device tokens only
     const devicesResponse = await pool.query(
       'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
-      ['usr_nazir_001'] // Baseel user ID
+      ['usr_baseel_001'] // Baseel user ID
     );
     
     const tokens = devicesResponse.rows.map(row => row.token);
@@ -538,7 +616,7 @@ async function sendDailySummaryToBaseel() {
     // Get Baseel's ACTIVE device token only
     const devicesResponse = await pool.query(
       'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
-      ['usr_nazir_001']
+      ['usr_baseel_001']
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
@@ -1020,7 +1098,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     const { userId } = req.query;
     
     // Security: Only allow Baseel user to access this report
-    if (userId !== 'usr_nazir_001') {
+    if (userId !== 'usr_baseel_001') {
       return res.status(403).json({ 
         success: false, 
         error: 'Access denied - Baseel only' 
@@ -1501,25 +1579,25 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
     console.log('🔍 DEBUGGING BASEEL NOTIFICATIONS...');
     
     // 1. Check Baseel's user role
-    const baseelRole = userRoles['usr_nazir_001'];
+    const baseelRole = userRoles['usr_baseel_001'];
     console.log('👤 Baseel user role:', baseelRole);
     
     // 2. Check all Baseel devices (active + inactive)
     const allDevicesResult = await pool.query(
       'SELECT token, platform, isactive, createdAt FROM user_devices WHERE userid = $1 ORDER BY createdAt DESC',
-      ['usr_nazir_001']
+      ['usr_baseel_001']
     );
     
     // 3. Check only active devices for comparison
     const activeDevicesResult = await pool.query(
       'SELECT token, platform, isactive, createdAt FROM user_devices WHERE userid = $1 AND isactive = true',
-      ['usr_nazir_001']
+      ['usr_baseel_001']
     );
     
     // 4. Get today's orders created by Baseel
     const baseelOrdersResult = await pool.query(
       'SELECT id, createdAt, createdByName FROM orders WHERE userId = $1 AND createdAt >= CURRENT_DATE ORDER BY createdAt DESC',
-      ['usr_nazir_001']
+      ['usr_baseel_001']
     );
     
     // 5. Get today's orders created by staff (should trigger notifications)
@@ -1531,7 +1609,7 @@ app.get('/api/debug-baseel-notifications', async (req, res) => {
     const debugInfo = {
       timestamp: new Date().toISOString(),
       baseelUserInfo: {
-        userId: 'usr_nazir_001',
+        userId: 'usr_baseel_001',
         role: baseelRole,
         shouldReceiveNotifications: baseelRole === 'staff'
       },
@@ -1924,7 +2002,7 @@ app.post('/api/reset-password-temp', async (req, res) => {
 // Quick Password Fix Endpoint - Fix baseel password
 app.post('/api/fix-baseel-password', async (req, res) => {
   try {
-    const userId = 'usr_nazir_001';
+    const userId = 'usr_baseel_001';
     const correctPassword = 'baseel123';
     
     console.log('🔧 Fixing password for user:', userId);
@@ -2085,7 +2163,7 @@ app.post('/api/reset-user-passwords', async (req, res) => {
         role: 'staff'
       },
       {
-        id: 'usr_nazir_001', 
+        id: 'usr_baseel_001', 
         username: 'baseel',
         password: 'baseel123',
         role: 'admin'
@@ -2236,7 +2314,7 @@ app.post('/api/create-admin-with-email', async (req, res) => {
 // Simple password fix endpoint + create admin user
 app.post('/api/fix-baseel-password', async (req, res) => {
   try {
-    const userId = 'usr_nazir_001';
+    const userId = 'usr_baseel_001';
     const correctPassword = 'baseel123';
     const hashedPassword = '$2b$10$d.O.juucl6lKUJtnsvQV4ep3ivEkpdASjEhjjFSwtp0ZqzakPyNB2';
     
