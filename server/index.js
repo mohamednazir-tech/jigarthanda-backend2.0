@@ -1156,51 +1156,58 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     console.log('📊 Found orders for last 3 days:', orders.length);
     console.log('📈 Daily trend data:', dailyTrend);
     
-    // Parse items and calculate frequencies
-    const itemStats = {};
-    const timeStats = { morning: 0, afternoon: 0, evening: 0, night: 0 };
-    let totalRevenue = 0;
-    let validOrderCount = 0;
-    const revenueByDate = {};
-    
-    orders.forEach(order => {
-      console.log(`🔍 Processing order ${order.id}, items type:`, typeof order.items);
-      console.log(`🔍 Items data:`, order.items);
+    try {
+      // Parse items and calculate frequencies
+      const itemStats = {};
+      const timeStats = { morning: 0, afternoon: 0, evening: 0, night: 0 };
+      let totalRevenue = 0;
+      let validOrderCount = 0;
+      const revenueByDate = {};
       
-      let items;
-      try {
-        items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
-        console.log(`🔍 Parsed items:`, items);
-      } catch (error) {
-        console.log(`❌ Failed to parse items for order ${order.id}:`, error);
-        return; // Skip this order
-      }
-      
-      // Validate items array
-      if (!Array.isArray(items)) {
-        console.log(`⚠️ Items is not an array for order ${order.id}:`, items);
-        return;
-      }
-      
-      // Use order ID timestamp as fallback for createdAt
-      let orderDateObj;
-      if (order.createdAt) {
-        orderDateObj = new Date(order.createdAt);
-        if (isNaN(orderDateObj.getTime())) {
+      orders.forEach(order => {
+        console.log(`🔍 Processing order ${order.id}, items type:`, typeof order.items);
+        console.log(`🔍 Items data:`, order.items);
+        
+        let items;
+        try {
+          items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+          console.log(`🔍 Parsed items:`, items);
+        } catch (error) {
+          console.log(`❌ Failed to parse items for order ${order.id}:`, error);
+          return; // Skip this order
+        }
+        
+        // Validate items array
+        if (!Array.isArray(items)) {
+          console.log(`⚠️ Items is not an array for order ${order.id}:`, items);
+          return;
+        }
+        
+        // Use order ID timestamp as fallback for createdAt
+        let orderDateObj;
+        if (order.createdAt) {
+          orderDateObj = new Date(order.createdAt);
+          if (isNaN(orderDateObj.getTime())) {
+            // Extract timestamp from order ID as fallback
+            const timestamp = parseInt(order.id.replace(/\D/g, ''));
+            orderDateObj = new Date(timestamp);
+            console.log(`⚠️ Using order ID timestamp for ${order.id}:`, orderDateObj);
+          }
+        } else {
           // Extract timestamp from order ID as fallback
           const timestamp = parseInt(order.id.replace(/\D/g, ''));
           orderDateObj = new Date(timestamp);
-          console.log(`⚠️ Using order ID timestamp for ${order.id}:`, orderDateObj);
+          console.log(`⚠️ No createdAt, using order ID timestamp for ${order.id}:`, orderDateObj);
         }
-      } else {
-        // Extract timestamp from order ID as fallback
-        const timestamp = parseInt(order.id.replace(/\D/g, ''));
-        orderDateObj = new Date(timestamp);
-        console.log(`⚠️ No createdAt, using order ID timestamp for ${order.id}:`, orderDateObj);
-      }
-      
-      const hour = orderDateObj.getHours();
-      const orderDate = orderDateObj.toISOString().split('T')[0];
+        
+        // Validate the final date object
+        if (isNaN(orderDateObj.getTime())) {
+          console.log(`⚠️ Invalid date for order ${order.id}, skipping...`);
+          return; // Skip this order
+        }
+        
+        const hour = orderDateObj.getHours();
+        const orderDate = orderDateObj.toISOString().split('T')[0];
       
       // Initialize date revenue tracking
       if (!revenueByDate[orderDate]) {
@@ -1334,6 +1341,15 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       success: true,
       report: report
     });
+    
+    } catch (processingError) {
+      console.error('❌ Error processing report data:', processingError);
+      console.error('❌ Stack trace:', processingError.stack);
+      res.status(500).json({ 
+        success: false, 
+        error: `Processing error: ${processingError.message}` 
+      });
+    }
     
   } catch (error) {
     console.error('❌ Baseel sales report error:', error);
