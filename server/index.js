@@ -294,28 +294,10 @@ app.post('/api/orders', async (req, res) => {
       console.log('Created by user ID:', userId);
       console.log('User role from cache:', userRole);
 
-      // Test: Add a Baseel device manually for testing
-app.post('/test-add-baseel-device', async (req, res) => {
-  try {
-    const testToken = 'ExponentPushToken[test_' + Date.now();
-    
-    await pool.query(
-      'INSERT INTO user_devices (userid, token, platform, isactive) VALUES ($1, $2, $3, true) ON CONFLICT (token) DO UPDATE SET isactive = true',
-      ['usr_baseel_001', testToken, 'android']
-    );
-    
-    console.log('✅ Test Baseel device added:', testToken);
-    res.json({ success: true, message: 'Test device added' });
-  } catch (error) {
-    console.error('❌ Test device addition failed:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Send push notification to Baseel for ALL new orders (both admin and staff)
-    console.log('🔔 New order created - sending notification to Baseel');
-    console.log('📱 Order created by:', userId, '(', userRole, ')');
-    console.log('🎯 Sending NEW ORDER notification to Baseel (usr_baseel_001)');
+      // Send push notification to Baseel for ALL new orders (both admin and staff)
+      console.log('🔔 New order created - sending notification to Baseel');
+      console.log('📱 Order created by:', userId, '(', userRole, ')');
+      console.log('🎯 Sending NEW ORDER notification to Baseel (usr_baseel_001)');
     
     // Debug: Check if order creator is Baseel
     if (userId === 'usr_baseel_001') {
