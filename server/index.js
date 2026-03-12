@@ -298,110 +298,110 @@ app.post('/api/orders', async (req, res) => {
       console.log('🔔 New order created - sending notification to Baseel');
       console.log('📱 Order created by:', userId, '(', userRole, ')');
       console.log('🎯 Sending NEW ORDER notification to Baseel (usr_baseel_001)');
-    
-    // Debug: Check if order creator is Baseel
-    if (userId === 'usr_baseel_001') {
-      console.log('🔍 Order created by Baseel - should still receive notification on other devices');
-    }
-    
-    // Get Baseel's ACTIVE device tokens only
-    const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
-      ['usr_baseel_001'] // Baseel user ID
-    );
-
-    const tokens = devicesResponse.rows.map(row => row.token);
-    
-    console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
-    console.log('📱 Device tokens:', tokens.map(t => t.slice(-10)));
-
-    if (tokens.length === 0) {
-      console.log('❌ No active devices found for Baseel - notifications disabled');
-      return;
-    }
-
-    console.log('📱 Found', tokens.length, 'active Baseel devices - sending notifications to all');
-
-    // Send push notifications to ALL active devices in PARALLEL for better performance
-    // Prepare notification data once
-    const items = typeof order.items === "string"
-      ? JSON.parse(order.items)
-      : order.items;
-    const itemNames = items.map(item => item.item.name).slice(0, 3);
-    const itemsText = itemNames.length > 2 
-      ? `${itemNames.join(', ')} + ${items.length - 2} more`
-      : itemNames.join(', ');
-
-    // Professional notification formatting
-    const orderTime = new Date().toLocaleTimeString('en-IN', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-
-    const notificationPromises = tokens.map(async (token) => {
-      try {
-        // Skip invalid tokens to prevent push errors
-        if (!token.startsWith('ExponentPushToken')) {
-          console.log(`⚠️ Skipping invalid token: ${token.slice(-10)}`);
-          return { success: false, token: token.slice(-10), error: 'Invalid token format' };
-        }
-        
-        await axios.post(
-          'https://exp.host/--/api/v2/push/send',
-          {
-            to: token,
-            sound: 'default',
-            title: '🧾 New Order - Hanifa Jigarthanda',
-            body: `${itemsText} • ₹${order.grandTotal} • ${orderTime}`,
-            data: { 
-              orderId: order.id,
-              type: 'new_order',
-              userId: order.userId,
-              total: order.grandTotal,
-              items: itemsText,
-              time: orderTime
-            },
-            priority: 'high',
-          },
-          { timeout: 5000 }
-        );
-        console.log(`✅ Push notification sent to active device: ${token.slice(-10)}`);
-        return { success: true, token: token.slice(-10) };
-      } catch (error) {
-        console.error(`❌ Push failed for active device ${token.slice(-10)}:`, error.message);
-        return { success: false, token: token.slice(-10), error: error.message };
+      
+      // Debug: Check if order creator is Baseel
+      if (userId === 'usr_baseel_001') {
+        console.log('🔍 Order created by Baseel - should still receive notification on other devices');
       }
-    });
+      
+      // Get Baseel's ACTIVE device tokens only
+      const devicesResponse = await pool.query(
+        'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
+        ['usr_baseel_001'] // Baseel user ID
+      );
 
-    // Wait for ALL notifications to complete in parallel
-    const results = await Promise.allSettled(notificationPromises);
-    
-    // Log results summary
-    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
-    const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
-    
-    console.log(`📊 Active device notification results: ${successful} successful, ${failed} failed`);
+      const tokens = devicesResponse.rows.map(row => row.token);
+      
+      console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
+      console.log('📱 Device tokens:', tokens.map(t => t.slice(-10)));
 
-    console.log('✅ Push notification sent to active Baseel devices:', tokens.length);
+      if (tokens.length === 0) {
+        console.log('❌ No active devices found for Baseel - notifications disabled');
+        return res.json({ success: true, order });
+      }
 
-    // Send confirmation to user who created order
-    console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
-    await sendPushNotificationToUser(order, userId);
+      console.log('📱 Found', tokens.length, 'active Baseel devices - sending notifications to all');
 
-    res.json({ success: true, message: 'Order created', order });
+      // Send push notifications to ALL active devices in PARALLEL for better performance
+      // Prepare notification data once
+      const orderItems = typeof order.items === "string"
+        ? JSON.parse(order.items)
+        : order.items;
+      const itemNames = orderItems.map(item => item.item.name).slice(0, 3);
+      const itemsText = itemNames.length > 2 
+        ? `${itemNames.join(', ')} + ${orderItems.length - 2} more`
+        : itemNames.join(', ');
 
+      // Professional notification formatting
+      const orderTime = new Date().toLocaleTimeString('en-IN', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+
+      const notificationPromises = tokens.map(async (token) => {
+        try {
+          // Skip invalid tokens to prevent push errors
+          if (!token.startsWith('ExponentPushToken')) {
+            console.log(`⚠️ Skipping invalid token: ${token.slice(-10)}`);
+            return { success: false, token: token.slice(-10), error: 'Invalid token format' };
+          }
+          
+          await axios.post(
+            'https://exp.host/--/api/v2/push/send',
+            {
+              to: token,
+              sound: 'default',
+              title: '🧾 New Order - Hanifa Jigarthanda',
+              body: `${itemsText} • ₹${order.grandTotal} • ${orderTime}`,
+              data: { 
+                orderId: order.id,
+                type: 'new_order',
+                userId: order.userId,
+                total: order.grandTotal,
+                items: itemsText,
+                time: orderTime
+              },
+              priority: 'high',
+            },
+            { timeout: 5000 }
+          );
+          console.log(`✅ Push notification sent to active device: ${token.slice(-10)}`);
+          return { success: true, token: token.slice(-10) };
+        } catch (error) {
+          console.error(`❌ Push failed for active device ${token.slice(-10)}:`, error.message);
+          return { success: false, token: token.slice(-10), error: error.message };
+        }
+      });
+
+      // Wait for ALL notifications to complete in parallel
+      const results = await Promise.allSettled(notificationPromises);
+      
+      // Log results summary
+      const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+      const failed = results.filter(r => r.status === 'rejected' || !r.value.success).length;
+      
+      console.log(`📊 Active device notification results: ${successful} successful, ${failed} failed`);
+
+      console.log('✅ Push notification sent to active Baseel devices:', tokens.length);
+
+      // Send confirmation to user who created order
+      console.log('📱 Sending ORDER CONFIRMED to creator:', userId);
+      await sendPushNotificationToUser(order, userId);
+
+      res.json({ success: true, message: 'Order created', order });
+
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('❌ Transaction rolled back:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('❌ Transaction rolled back:', error);
-    throw error;
-  } finally {
-    client.release();
+    console.error('=== ORDER CREATION ERROR ===');
+    console.error('Error details:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
-} catch (error) {
-  console.error('=== ORDER CREATION ERROR ===');
-  console.error('Error details:', error);
-  res.status(500).json({ success: false, error: error.message });
-}
 });
 
 // Send push notification to Baseel (only to active devices)
