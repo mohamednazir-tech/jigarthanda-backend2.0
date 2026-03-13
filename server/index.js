@@ -220,8 +220,9 @@ app.post('/api/orders/sync', async (req, res) => {
 
 // Cached user roles for performance and security
 const userRoles = {
-  "usr_admin_001": "admin",
-  "usr_baseel_001": "staff"
+  "usr_admin_001": "staff",
+  "usr_baseel_001": "admin",
+  "usr_nazir_001": "admin"
 };
 
 // Create Order with Push Notification - v2.3 (Fixed query params - 2026-03-04-19:40)
