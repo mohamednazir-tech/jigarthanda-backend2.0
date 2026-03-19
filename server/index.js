@@ -1134,7 +1134,8 @@ app.get('/api/orders/stats', async (req, res) => {
         COUNT(CASE WHEN status = 'ready' THEN 1 END) as ready_orders,
         COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders
       FROM orders
-      WHERE createdAt >= CURRENT_DATE
+      WHERE createdAt >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')
+      AND createdAt < ((DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata')
     `);
 
     const stats = result.rows[0];
@@ -1183,7 +1184,8 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         o.id,
         o.grandTotal
       FROM orders o
-      WHERE o.createdAt >= CURRENT_DATE
+      WHERE o.createdAt >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')
+      AND o.createdAt < ((DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata')
       ORDER BY o.createdAt DESC
     `;
     
@@ -1194,7 +1196,8 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         SUM(COALESCE(grandTotal,total)) as totalrevenue,
         AVG(COALESCE(grandTotal,total)) as avgordervalue
       FROM orders o
-      WHERE o.createdAt >= CURRENT_DATE
+      WHERE o.createdAt >= (DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')
+      AND o.createdAt < ((DATE_TRUNC('day', NOW() AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 day') AT TIME ZONE 'Asia/Kolkata')
     `;
     
     // Daily revenue trend for enhanced reporting
