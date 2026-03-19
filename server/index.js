@@ -825,7 +825,7 @@ app.get('/api/orders', async (req, res) => {
 
     console.log(`📊 Pagination: limit=${safeLimit}, offset=${safeOffset}`);
     
-    // Optimized query with better indexing
+    // Optimized query with better indexing and timezone handling
     const result = await pool.query(`
       SELECT 
         id,
@@ -840,7 +840,7 @@ app.get('/api/orders', async (req, res) => {
         status,
         createdAt
       FROM orders 
-      WHERE createdAt >= NOW() - INTERVAL '3 days'
+      WHERE createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata' - INTERVAL '3 days')
       ORDER BY createdAt DESC 
       LIMIT $1 OFFSET $2
     `, [safeLimit, safeOffset]);
