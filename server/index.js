@@ -330,33 +330,48 @@ app.post('/api/orders', async (req, res) => {
       console.log('Created by user ID:', userId);
       console.log('User role from cache:', userRole);
 
-      // Send push notification to Baseel for ALL new orders (both admin and staff)
-      console.log('🔔 New order created - sending notification to Baseel');
+      // Send push notification to ALL admin/staff users for new orders
+      console.log('🔔 New order created - sending notifications to admin/staff users');
       console.log('📱 Order created by:', userId, '(', userRole, ')');
-      console.log('🎯 Sending NEW ORDER notification to Baseel (usr_baseel_001)');
       
-      // Debug: Check if order creator is Baseel
-      if (userId === 'usr_baseel_001') {
-        console.log('🔍 Order created by Baseel - should still receive notification on other devices');
+      // Get all users with admin or staff roles
+      const adminStaffUsers = Object.entries(userRoles)
+        .filter(([id, role]) => role === 'admin' || role === 'staff')
+        .map(([id]) => id);
+      
+      console.log('👥 Admin/Staff users to notify:', adminStaffUsers);
+      
+      // Don't send notification to the user who created the order
+      const usersToNotify = adminStaffUsers.filter(id => id !== userId);
+      console.log('� Users to notify (excluding creator):', usersToNotify);
+      
+      if (usersToNotify.length === 0) {
+        console.log('❌ No other admin/staff users to notify');
+        return res.json({ success: true, order });
       }
       
-      // Get Baseel's ACTIVE device tokens only
+      // Get ACTIVE device tokens for all admin/staff users
       const devicesResponse = await pool.query(
-        'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
-        ['usr_baseel_001'] // Baseel user ID
+        'SELECT token, userid FROM user_devices WHERE userid = ANY($1) AND isactive = true',
+        [usersToNotify]
       );
 
       const tokens = devicesResponse.rows.map(row => row.token);
+      const userTokens = devicesResponse.rows.reduce((acc, row) => {
+        if (!acc[row.userid]) acc[row.userid] = [];
+        acc[row.userid].push(row.token);
+        return acc;
+      }, {});
       
-      console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
-      console.log('📱 Device tokens:', tokens.map(t => t.slice(-10)));
+      console.log('📱 Found', tokens.length, 'active devices for notifications');
+      console.log('📱 Device tokens by user:', Object.entries(userTokens).map(([uid, t]) => `${uid}: ${t.length} tokens`));
 
       if (tokens.length === 0) {
-        console.log('❌ No active devices found for Baseel - notifications disabled');
+        console.log('❌ No active devices found for admin/staff users - notifications disabled');
         return res.json({ success: true, order });
       }
 
-      console.log('📱 Found', tokens.length, 'active Baseel devices - sending notifications to all');
+      console.log('📱 Found', tokens.length, 'active admin/staff devices - sending notifications to all');
 
       // Send push notifications to ALL active devices in PARALLEL for better performance
       // Prepare notification data once
@@ -440,28 +455,49 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// Send push notification to Baseel (only to active devices)
-async function sendPushNotificationToBaseel(order) {
+// Send push notification to all admin/staff users (only to active devices)
+async function sendPushNotificationToAdminStaff(order) {
   try {
-    console.log('🎯 sendPushNotificationToBaseel called for order:', order.id);
+    console.log('🎯 sendPushNotificationToAdminStaff called for order:', order.id);
     
-    // Get Baseel's ACTIVE device tokens only
+    // Get all users with admin or staff roles
+    const adminStaffUsers = Object.entries(userRoles)
+      .filter(([id, role]) => role === 'admin' || role === 'staff')
+      .map(([id]) => id);
+    
+    console.log('👥 Admin/Staff users to notify:', adminStaffUsers);
+    
+    // Don't send notification to user who created order
+    const usersToNotify = adminStaffUsers.filter(id => id !== order.userId);
+    console.log('📱 Users to notify (excluding creator):', usersToNotify);
+    
+    if (usersToNotify.length === 0) {
+      console.log('❌ No other admin/staff users to notify');
+      return;
+    }
+    
+    // Get ACTIVE device tokens for all admin/staff users
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
-      ['usr_baseel_001'] // Baseel user ID
+      'SELECT token, userid FROM user_devices WHERE userid = ANY($1) AND isactive = true',
+      [usersToNotify]
     );
     
     const tokens = devicesResponse.rows.map(row => row.token);
+    const userTokens = devicesResponse.rows.reduce((acc, row) => {
+      if (!acc[row.userid]) acc[row.userid] = [];
+      acc[row.userid].push(row.token);
+      return acc;
+    }, {});
     
-    console.log('📱 Found', tokens.length, 'active Baseel devices for notifications');
-    console.log('📱 Device tokens:', tokens.map(t => t.slice(-10)));
+    console.log('📱 Found', tokens.length, 'active admin/staff devices for notifications');
+    console.log('📱 Device tokens by user:', Object.entries(userTokens).map(([uid, t]) => `${uid}: ${t.length} tokens`));
 
     if (tokens.length === 0) {
-      console.log('❌ No active devices found for Baseel - notifications disabled');
+      console.log('❌ No active devices found for admin/staff users - notifications disabled');
       return;
     }
 
-    console.log('📱 Found', tokens.length, 'active Baseel devices - sending notifications to all');
+    console.log('📱 Found', tokens.length, 'active admin/staff devices - sending notifications to all');
 
     // Send push notifications to ALL active devices in PARALLEL for better performance
     // Prepare notification data once
@@ -611,8 +647,8 @@ async function sendPushNotificationToUser(order, userId) {
   }
 }
 
-// Send daily summary notification to Baseel at 11:59 PM
-async function sendDailySummaryToBaseel() {
+// Send daily summary notification to admin/staff users at 11:59 PM
+async function sendDailySummaryToAdminStaff() {
   try {
     const currentDate = new Date();
     const startOfDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
@@ -631,16 +667,28 @@ async function sendDailySummaryToBaseel() {
       0
     );
 
-    // Get Baseel's ACTIVE device token only
+    // Get all users with admin or staff roles
+    const adminStaffUsers = Object.entries(userRoles)
+      .filter(([id, role]) => role === 'admin' || role === 'staff')
+      .map(([id]) => id);
+    
+    console.log('👥 Admin/Staff users for daily summary:', adminStaffUsers);
+    
+    // Get ACTIVE device tokens for all admin/staff users
     const devicesResponse = await pool.query(
-      'SELECT token FROM user_devices WHERE userid = $1 AND isactive = true',
-      ['usr_baseel_001']
+      'SELECT token, userid FROM user_devices WHERE userid = ANY($1) AND isactive = true',
+      [adminStaffUsers]
     );
 
     const tokens = devicesResponse.rows.map(row => row.token);
+    const userTokens = devicesResponse.rows.reduce((acc, row) => {
+      if (!acc[row.userid]) acc[row.userid] = [];
+      acc[row.userid].push(row.token);
+      return acc;
+    }, {});
 
     if (tokens.length === 0) {
-      console.log('No devices found for Baseel daily summary');
+      console.log('No devices found for admin/staff daily summary');
       return;
     }
 
@@ -721,7 +769,7 @@ function scheduleDailySummaryFallback() {
   console.log(`⏰ Runs in ${(delay / 60000).toFixed(1)} minutes`);
 
   setTimeout(() => {
-    sendDailySummaryToBaseel();
+    sendDailySummaryToAdminStaff();
     scheduleDailySummaryFallback(); // schedule next run
   }, delay);
 }
@@ -730,7 +778,7 @@ function scheduleDailySummaryFallback() {
 if (cron) {
   cron.schedule('30 23 * * *', async () => {
     console.log('📅 Running daily summary via cron (11:30 PM)');
-    await sendDailySummaryToBaseel();
+    await sendDailySummaryToAdminStaff();
   });
 } else {
   console.log('⚠️ Using fallback scheduler - install node-cron for production reliability');
@@ -1142,9 +1190,9 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     // Also get aggregate data for faster average calculation
     const aggregateQuery = `
       SELECT 
-        COUNT(*) as totalOrders,
-        SUM(COALESCE(grandTotal,total)) as totalRevenue,
-        AVG(COALESCE(grandTotal,total)) as avgOrderValue
+        COUNT(*) as totalorders,
+        SUM(COALESCE(grandTotal,total)) as totalrevenue,
+        AVG(COALESCE(grandTotal,total)) as avgordervalue
       FROM orders o
       WHERE o.createdAt >= CURRENT_DATE
     `;
@@ -1791,12 +1839,12 @@ app.post('/api/test-baseel-notification', async (req, res) => {
       createdAt: new Date()
     };
     
-    // Send notification to Baseel
-    await sendPushNotificationToBaseel(testOrder);
+    // Send notification to admin/staff users
+    await sendPushNotificationToAdminStaff(testOrder);
     
     res.json({
       success: true,
-      message: 'Test notification sent to Baseel',
+      message: 'Test notification sent to admin/staff users',
       testOrder: testOrder
     });
     
@@ -1810,10 +1858,10 @@ app.post('/api/test-baseel-notification', async (req, res) => {
 app.post('/api/test-daily-summary', async (req, res) => {
   try {
     console.log('🧪 Testing daily summary notification...');
-    await sendDailySummaryToBaseel();
+    await sendDailySummaryToAdminStaff();
     res.json({ 
       success: true, 
-      message: 'Daily summary notification sent to Baseel devices'
+      message: 'Daily summary notification sent to admin/staff users'
     });
   } catch (error) {
     console.error('❌ Daily summary test error:', error);
@@ -2466,7 +2514,7 @@ const startServer = async () => {
         
         if (now.getHours() >= 1 && now.getHours() < 23) {
           console.log("📅 Server woke up after 12:01 AM - sending missed daily summary");
-          await sendDailySummaryToBaseel();
+          await sendDailySummaryToAdminStaff();
         }
       }, 60000); // Check 1 minute after start
 
