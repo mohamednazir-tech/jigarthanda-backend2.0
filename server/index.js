@@ -234,10 +234,45 @@ app.post('/api/orders', async (req, res) => {
     
     const { userId, items, total, tax, grandTotal, paymentMethod } = req.body;
 
+    console.log('=== SERVER VALIDATION DEBUG ===');
+    console.log('Received fields:', Object.keys(req.body));
+    console.log('Field values:', {
+      userId,
+      items: items ? `Array[${items.length}]` : 'undefined',
+      total,
+      tax,
+      grandTotal,
+      paymentMethod
+    });
+    console.log('Field types:', {
+      userId: typeof userId,
+      items: typeof items,
+      total: typeof total,
+      tax: typeof tax,
+      grandTotal: typeof grandTotal,
+      paymentMethod: typeof paymentMethod
+    });
+    console.log('============================');
+
+    // Validate required fields
     if (!userId || !items || !total || !paymentMethod) {
       console.log('=== VALIDATION FAILED ===');
       console.log('Missing fields:', { userId: !!userId, items: !!items, total: !!total, paymentMethod: !!paymentMethod });
       return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    // Validate total is not zero
+    if (total === 0 || grandTotal === 0) {
+      console.log('=== VALIDATION FAILED ===');
+      console.log('Zero total order not allowed');
+      return res.status(400).json({ success: false, message: 'Order total cannot be zero' });
+    }
+
+    // Validate items array is not empty
+    if (!Array.isArray(items) || items.length === 0) {
+      console.log('=== VALIDATION FAILED ===');
+      console.log('Empty or invalid items array');
+      return res.status(400).json({ success: false, message: 'Order must contain at least one item' });
     }
 
     // Get user role from cached map (secure & fast)
@@ -1090,7 +1125,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     
     console.log('📊 Generating Baseel sales report for user:', userId);
     
-    // Get last 3 days sales data with item frequencies AND aggregate calculations
+    // Get TODAY's sales data with item frequencies AND aggregate calculations
     const salesDataQuery = `
       SELECT 
         o.items,
@@ -1100,7 +1135,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         o.id,
         o.grandTotal
       FROM orders o
-      WHERE o.createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '3 days'
+      WHERE o.createdAt >= CURRENT_DATE
       ORDER BY o.createdAt DESC
     `;
     
@@ -1111,7 +1146,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         SUM(COALESCE(grandTotal,total)) as totalRevenue,
         AVG(COALESCE(grandTotal,total)) as avgOrderValue
       FROM orders o
-      WHERE o.createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '3 days'
+      WHERE o.createdAt >= CURRENT_DATE
     `;
     
     // Daily revenue trend for enhanced reporting
@@ -1121,7 +1156,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
         SUM(COALESCE(o.grandTotal, o.total)) as revenue,
         COUNT(*) as orders
       FROM orders o
-      WHERE o.createdAt >= (NOW() AT TIME ZONE 'Asia/Kolkata') - INTERVAL '3 days'
+      WHERE o.createdAt >= CURRENT_DATE
       GROUP BY DATE(o.createdAt AT TIME ZONE 'Asia/Kolkata')
       ORDER BY day DESC
     `;
@@ -1136,7 +1171,7 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     const aggregates = aggregateResult.rows[0];
     const dailyTrend = trendResult.rows;
     
-    console.log('📊 Found orders for last 3 days:', orders.length);
+    console.log('📊 Found orders for today:', orders.length);
     console.log('📈 Daily trend data:', dailyTrend);
     
     try {
