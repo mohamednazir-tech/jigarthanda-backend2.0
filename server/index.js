@@ -1174,6 +1174,9 @@ app.get('/api/baseel-sales-report', async (req, res) => {
     console.log('📊 Found orders for today:', orders.length);
     console.log('📈 Daily trend data:', dailyTrend);
     console.log('📊 Aggregates from DB:', aggregates);
+    console.log('📊 Aggregates.totalOrders:', aggregates.totalorders);
+    console.log('📊 Aggregates.totalRevenue:', aggregates.totalrevenue);
+    console.log('📊 Aggregates.avgOrderValue:', aggregates.avgordervalue);
     
     try {
       // Parse items and calculate frequencies
@@ -1323,9 +1326,9 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       timestamp: new Date().toISOString(),
       date: `Today (${new Date().toISOString().split('T')[0]})`,
       summary: {
-        totalOrders: aggregates.totalOrders || orders.length,
-        totalRevenue: Math.round((aggregates.totalRevenue || 0) * 100) / 100,
-        avgOrderValue: Math.round((aggregates.avgOrderValue || 0) * 100) / 100,
+        totalOrders: aggregates.totalorders || orders.length,
+        totalRevenue: Math.round((aggregates.totalrevenue || 0) * 100) / 100,
+        avgOrderValue: Math.round((aggregates.avgordervalue || 0) * 100) / 100,
         uniqueItems: itemsArray.length,
         peakTime: Object.keys(timeStats).reduce((a, b) => 
           timeStats[a] > timeStats[b] ? a : b
@@ -1346,9 +1349,9 @@ app.get('/api/baseel-sales-report', async (req, res) => {
       insights: {
         topPerformer: allItemsRanked[0]?.name || 'No data',
         worstPerformer: allItemsRanked[allItemsRanked.length - 1]?.name || 'No data',
-        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / (aggregates.totalRevenue || 0) * 100),
-        recommendation: (aggregates.totalRevenue || 0) > 1000 ? '🎉 Excellent Sales Day!' : 
-                      (aggregates.totalRevenue || 0) > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
+        revenueConcentration: Math.round((allItemsRanked[0]?.revenue || 0) / (aggregates.totalrevenue || 0) * 100),
+        recommendation: (aggregates.totalrevenue || 0) > 1000 ? '🎉 Excellent Sales Day!' : 
+                      (aggregates.totalrevenue || 0) > 500 ? '📈 Good Sales Day' : '💪 Keep Pushing!'
       }
     };
     
